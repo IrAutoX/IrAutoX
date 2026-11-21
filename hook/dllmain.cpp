@@ -29,6 +29,8 @@ static void Quad(IDirect3DDevice9* device, float x, float y, float w, float h, D
 
 static const uint8_t* Glyph(char c) {
     static const uint8_t blank[7]{};
+    static const uint8_t colon[7] = {0,0,4,0,0,4,0};
+    static const uint8_t dash[7] = {0,0,0,31,0,0,0};
     static const uint8_t letters[36][7] = {
         {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},{14,17,16,16,16,17,14},
         {30,17,17,17,17,17,30},{31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
@@ -46,8 +48,8 @@ static const uint8_t* Glyph(char c) {
     };
     if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
     if (c >= '0' && c <= '9') return letters[26 + c - '0'];
-    if (c == ':') return letters[36];
-    if (c == '-') return letters[37];
+    if (c == ':') return colon;
+    if (c == '-') return dash;
     return blank;
 }
 
