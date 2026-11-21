@@ -26,7 +26,7 @@ jobs:
       - name: Configure Qt6 launcher
         run: cmake -S . -B build -A x64
       - name: Build Qt6 launcher
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 8
       - name: Deploy Qt runtime
         shell: pwsh
         run: |
