@@ -3,18 +3,27 @@
 #include <MinHook.h>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 
 using Direct3DCreate9Fn = IDirect3D9* (WINAPI*)(UINT);
 using CreateDeviceFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
 using EndSceneFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*);
 using GameProcessFn = void (__cdecl*)();
-using FrontEndFn = void (__thiscall*)(void*);
+using GameMemberFn = void (__thiscall*)(void*);
 
 static Direct3DCreate9Fn originalDirect3DCreate9{};
 static CreateDeviceFn originalCreateDevice{};
 static EndSceneFn originalEndScene{};
 static GameProcessFn originalGameProcess{};
-static FrontEndFn originalDrawFrontEnd{};
+static GameMemberFn originalRenderSplash{};
+static GameMemberFn originalRenderLoadingBar{};
+static IDirect3DTexture9* uiTexture{};
+static HDC uiDC{};
+static HBITMAP uiBitmap{};
+static HGDIOBJ oldBitmap{};
+static void* uiPixels{};
+static int uiWidth{};
+static int uiHeight{};
 static volatile LONG customMainMenuVisible = 1;
 static volatile LONG settingsPage = 0;
 static HWND gameWindow{};
@@ -34,43 +43,6 @@ static void Quad(IDirect3DDevice9* device, float x, float y, float w, float h, D
         {x, y, 0, 1, color}, {x + w, y + h, 0, 1, color}, {x, y + h, 0, 1, color}
     };
     device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, v, sizeof(Vertex));
-}
-
-static const uint8_t* Glyph(char c) {
-    static const uint8_t blank[7]{};
-    static const uint8_t colon[7] = {0,0,4,0,0,4,0};
-    static const uint8_t dash[7] = {0,0,0,31,0,0,0};
-    static const uint8_t letters[36][7] = {
-        {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},{14,17,16,16,16,17,14},
-        {30,17,17,17,17,17,30},{31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
-        {14,17,16,23,17,17,15},{17,17,17,31,17,17,17},{14,4,4,4,4,4,14},
-        {7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
-        {17,27,21,21,17,17,17},{17,25,21,19,17,17,17},{14,17,17,17,17,17,14},
-        {30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
-        {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},
-        {17,17,17,17,17,10,4},{17,17,17,21,21,21,10},{17,17,10,4,10,17,17},
-        {17,17,10,4,4,4,4},{31,1,2,4,8,16,31},
-        {14,17,19,21,25,17,14},{4,12,4,4,4,4,14},{14,17,1,2,4,8,31},
-        {30,1,1,14,1,1,30},{2,6,10,18,31,2,2},{31,16,16,30,1,1,30},
-        {14,16,16,30,17,17,14},{31,1,2,4,8,8,8},{14,17,17,14,17,17,14},
-        {14,17,17,15,1,1,14}
-    };
-    if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
-    if (c >= '0' && c <= '9') return letters[26 + c - '0'];
-    if (c == ':') return colon;
-    if (c == '-') return dash;
-    return blank;
-}
-
-static void Text(IDirect3DDevice9* device, float x, float y, const char* value, float scale, DWORD color) {
-    for (const char* p = value; *p; ++p) {
-        const auto rows = Glyph(*p);
-        for (int row = 0; row < 7; ++row)
-            for (int col = 0; col < 5; ++col)
-                if (rows[row] & (1 << (4 - col)))
-                    Quad(device, x + col * scale, y + row * scale, scale, scale, color);
-        x += 6 * scale;
-    }
 }
 
 static void AcquireMenuCursor() {
@@ -97,61 +69,121 @@ static bool MousePosition(float& x, float& y) {
     return true;
 }
 
-static bool Button(IDirect3DDevice9* device, float x, float y, float w, float h,
-                   float mouseX, float mouseY, bool mouseValid, const char* label) {
-    const bool hovered = mouseValid && mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
-    const DWORD fill = hovered ? D3DCOLOR_ARGB(245, 226, 75, 55) : D3DCOLOR_ARGB(225, 28, 30, 34);
-    Quad(device, x, y, w, h, fill);
-    Quad(device, x, y, 3, h, D3DCOLOR_ARGB(255, 226, 75, 55));
-    Text(device, x + 20, y + (h - 14) * 0.5f, label, 2.0f,
-         hovered ? D3DCOLOR_ARGB(255, 255, 255, 255) : D3DCOLOR_ARGB(255, 225, 225, 220));
-    return hovered && (GetAsyncKeyState(VK_LBUTTON) & 1);
+static void ReleaseUIResources() {
+    if (uiTexture) { uiTexture->Release(); uiTexture = nullptr; }
+    if (uiDC) {
+        if (oldBitmap) SelectObject(uiDC, oldBitmap);
+        if (uiBitmap) DeleteObject(uiBitmap);
+        DeleteDC(uiDC);
+    }
+    uiDC = nullptr;
+    uiBitmap = nullptr;
+    oldBitmap = nullptr;
+    uiPixels = nullptr;
+    uiWidth = uiHeight = 0;
 }
 
-static void DrawCustomMenu(IDirect3DDevice9* device, bool mainMenu) {
-    D3DVIEWPORT9 viewport{};
-    if (FAILED(device->GetViewport(&viewport))) return;
-    AcquireMenuCursor();
+static bool EnsureUIResources(IDirect3DDevice9* device, int width, int height) {
+    if (uiTexture && uiWidth == width && uiHeight == height) return true;
+    ReleaseUIResources();
+    if (FAILED(device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8,
+                                     D3DPOOL_DEFAULT, &uiTexture, nullptr))) return false;
+    uiDC = CreateCompatibleDC(nullptr);
+    if (!uiDC) { ReleaseUIResources(); return false; }
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    uiBitmap = CreateDIBSection(uiDC, &info, DIB_RGB_COLORS, &uiPixels, nullptr, 0);
+    if (!uiBitmap || !uiPixels) { ReleaseUIResources(); return false; }
+    oldBitmap = SelectObject(uiDC, uiBitmap);
+    uiWidth = width;
+    uiHeight = height;
+    return true;
+}
 
-    IDirect3DStateBlock9* state{};
-    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &state))) state->Capture();
+static void Fill(HDC dc, int x, int y, int w, int h, COLORREF color) {
+    RECT r{x, y, x + w, y + h};
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(dc, &r, brush);
+    DeleteObject(brush);
+}
 
-    device->SetTexture(0, nullptr);
-    device->SetPixelShader(nullptr);
-    device->SetVertexShader(nullptr);
-    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-    device->SetRenderState(D3DRS_ZENABLE, FALSE);
-    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+static void DrawLabel(HDC dc, const wchar_t* value, int x, int y, int size,
+                      COLORREF color, int weight = FW_NORMAL) {
+    HFONT font = CreateFontW(-size, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                             DEFAULT_PITCH | FF_DONTCARE, L"Bahnschrift");
+    HGDIOBJ previous = SelectObject(dc, font);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, color);
+    TextOutW(dc, x, y, value, static_cast<int>(wcslen(value)));
+    SelectObject(dc, previous);
+    DeleteObject(font);
+}
 
-    const float width = static_cast<float>(viewport.Width);
-    const float height = static_cast<float>(viewport.Height);
-    float mouseX{}, mouseY{};
-    const bool mouseValid = MousePosition(mouseX, mouseY);
+static bool DrawMenuButton(HDC dc, int x, int y, int w, int h, int mx, int my,
+                           bool mouseValid, const wchar_t* label) {
+    const bool hover = mouseValid && mx >= x && mx <= x + w && my >= y && my <= y + h;
+    const COLORREF fill = hover ? RGB(183, 54, 42) : RGB(27, 30, 33);
+    Fill(dc, x, y, w, h, fill);
+    Fill(dc, x, y, 4, h, RGB(229, 89, 59));
+    HPEN pen = CreatePen(PS_SOLID, 1, hover ? RGB(244, 127, 91) : RGB(69, 73, 76));
+    HGDIOBJ oldPen = SelectObject(dc, pen);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+    Rectangle(dc, x, y, x + w, y + h);
+    SelectObject(dc, oldBrush);
+    SelectObject(dc, oldPen);
+    DeleteObject(pen);
+    DrawLabel(dc, label, x + 24, y + (h - 24) / 2, 24, RGB(245, 243, 235), FW_SEMIBOLD);
+    return hover && (GetAsyncKeyState(VK_LBUTTON) & 1);
+}
 
-    Quad(device, 0, 0, width, height, D3DCOLOR_ARGB(205, 8, 10, 13));
-    Quad(device, 0, height * 0.83f, width, height * 0.17f, D3DCOLOR_ARGB(100, 0, 0, 0));
-    Quad(device, width * 0.065f, height * 0.12f, 5, height * 0.72f, D3DCOLOR_ARGB(255, 226, 75, 55));
+static void RenderMenuTexture(IDirect3DDevice9* device, bool mainMenu) {
+    D3DVIEWPORT9 vp{};
+    if (FAILED(device->GetViewport(&vp)) || !EnsureUIResources(device, static_cast<int>(vp.Width), static_cast<int>(vp.Height)))
+        return;
 
-    Text(device, width * 0.09f, height * 0.16f, "IRAUTOX", 4.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
-    Text(device, width * 0.092f, height * 0.25f, "SAN ANDREAS", 1.8f, D3DCOLOR_ARGB(255, 226, 75, 55));
-    Text(device, width * 0.092f, height * 0.30f, "COMMUNITY EDITION", 1.2f, D3DCOLOR_ARGB(220, 205, 207, 205));
+    const int w = static_cast<int>(vp.Width);
+    const int h = static_cast<int>(vp.Height);
+    Fill(uiDC, 0, 0, w, h, RGB(10, 13, 16));
+    for (int y = 0; y < h; y += 4) {
+        const int shade = 12 + (y * 13 / std::max(1, h));
+        Fill(uiDC, 0, y, w, std::min(4, h - y), RGB(shade, shade + 2, shade + 3));
+    }
 
-    const float bx = width * 0.09f;
-    const float by = height * 0.43f;
-    const float bw = width * 0.27f;
-    const float bh = height * 0.075f;
+    Fill(uiDC, 0, 0, w, 7, RGB(224, 76, 54));
+    Fill(uiDC, static_cast<int>(w * 0.065f), static_cast<int>(h * 0.12f), 5,
+         static_cast<int>(h * 0.72f), RGB(224, 76, 54));
+
+    DrawLabel(uiDC, L"IRAutoX", static_cast<int>(w * 0.09f), static_cast<int>(h * 0.13f),
+              std::max(36, h / 17), RGB(246, 244, 237), FW_BOLD);
+    DrawLabel(uiDC, L"SAN ANDREAS", static_cast<int>(w * 0.092f), static_cast<int>(h * 0.235f),
+              std::max(19, h / 39), RGB(231, 91, 65), FW_BOLD);
+    DrawLabel(uiDC, L"COMMUNITY EDITION  /  OFFLINE", static_cast<int>(w * 0.092f),
+              static_cast<int>(h * 0.285f), std::max(13, h / 57), RGB(174, 180, 181));
+
+    POINT pt{};
+    const bool mouseValid = GetCursorPos(&pt) && gameWindow && ScreenToClient(gameWindow, &pt);
+    const int mx = mouseValid ? pt.x : -1;
+    const int my = mouseValid ? pt.y : -1;
+    const int bx = static_cast<int>(w * 0.09f);
+    const int by = static_cast<int>(h * 0.42f);
+    const int bw = std::min(static_cast<int>(w * 0.30f), 440);
+    const int bh = std::max(52, static_cast<int>(h * 0.075f));
     bool clicked = false;
 
     if (mainMenu && !InterlockedCompareExchange(&settingsPage, 0, 0)) {
-        clicked = Button(device, bx, by, bw, bh, mouseX, mouseY, mouseValid, "PLAY");
-        if (!clicked) clicked = Button(device, bx, by + bh + 12, bw, bh, mouseX, mouseY, mouseValid, "SETTINGS");
-        if (!clicked) clicked = Button(device, bx, by + (bh + 12) * 2, bw, bh, mouseX, mouseY, mouseValid, "EXIT");
+        clicked = DrawMenuButton(uiDC, bx, by, bw, bh, mx, my, mouseValid, L"PLAY");
+        if (!clicked) clicked = DrawMenuButton(uiDC, bx, by + bh + 14, bw, bh, mx, my, mouseValid, L"SETTINGS");
+        if (!clicked) clicked = DrawMenuButton(uiDC, bx, by + (bh + 14) * 2, bw, bh, mx, my, mouseValid, L"EXIT");
         if (clicked) {
-            if (mouseY >= by + (bh + 12) * 2) {
+            if (my >= by + (bh + 14) * 2) {
                 PostMessageW(gameWindow, WM_CLOSE, 0, 0);
-            } else if (mouseY >= by + bh + 12) {
+            } else if (my >= by + bh + 14) {
                 InterlockedExchange(&settingsPage, 1);
             } else {
                 InterlockedExchange(&customMainMenuVisible, 0);
@@ -165,27 +197,60 @@ static void DrawCustomMenu(IDirect3DDevice9* device, bool mainMenu) {
             }
         }
     } else if (mainMenu) {
-        Text(device, bx, by, "SETTINGS", 2.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
-        Text(device, bx, by + 45, "GRAPHICS AND AUDIO", 1.3f, D3DCOLOR_ARGB(255, 190, 194, 194));
-        if (Button(device, bx, by + 100, bw, bh, mouseX, mouseY, mouseValid, "BACK"))
+        DrawLabel(uiDC, L"SETTINGS", bx, by, 28, RGB(245, 243, 235), FW_BOLD);
+        DrawLabel(uiDC, L"DISPLAY  /  AUDIO  /  CONTROLS", bx, by + 48, 18, RGB(178, 184, 184));
+        if (DrawMenuButton(uiDC, bx, by + 100, bw, bh, mx, my, mouseValid, L"BACK"))
             InterlockedExchange(&settingsPage, 0);
     } else {
-        Text(device, bx, by, "IRAUTOX OVERLAY", 2.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
-        Text(device, bx, by + 45, "F7 TO CLOSE", 1.3f, D3DCOLOR_ARGB(255, 190, 194, 194));
+        DrawLabel(uiDC, L"IRAUTOX OVERLAY", bx, by, 28, RGB(245, 243, 235), FW_BOLD);
+        DrawLabel(uiDC, L"PRESS F7 TO CLOSE", bx, by + 48, 18, RGB(178, 184, 184));
     }
 
-    Text(device, width * 0.09f, height * 0.91f, "A NEW WAY TO PLAY SAN ANDREAS", 1.1f,
-         D3DCOLOR_ARGB(190, 210, 210, 205));
+    DrawLabel(uiDC, L"A NEW WAY TO PLAY SAN ANDREAS", static_cast<int>(w * 0.09f),
+              static_cast<int>(h * 0.91f), std::max(12, h / 65), RGB(167, 173, 173));
 
-    if (state) {
-        state->Apply();
-        state->Release();
+    D3DLOCKED_RECT locked{};
+    if (SUCCEEDED(uiTexture->LockRect(0, &locked, nullptr, D3DLOCK_DISCARD))) {
+        const auto* src = static_cast<const uint8_t*>(uiPixels);
+        auto* dst = static_cast<uint8_t*>(locked.pBits);
+        for (int y = 0; y < h; ++y)
+            memcpy(dst + y * locked.Pitch, src + y * w * 4, static_cast<size_t>(w) * 4);
+        uiTexture->UnlockRect(0);
+    } else {
+        return;
     }
+
+    IDirect3DStateBlock9* state{};
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &state))) state->Capture();
+    struct TVertex { float x, y, z, rhw; DWORD color; float u, v; };
+    TVertex quad[] = {
+        {0, 0, 0, 1, 0xFFFFFFFF, 0, 0},
+        {static_cast<float>(w), 0, 0, 1, 0xFFFFFFFF, 1, 0},
+        {static_cast<float>(w), static_cast<float>(h), 0, 1, 0xFFFFFFFF, 1, 1},
+        {0, 0, 0, 1, 0xFFFFFFFF, 0, 0},
+        {static_cast<float>(w), static_cast<float>(h), 0, 1, 0xFFFFFFFF, 1, 1},
+        {0, static_cast<float>(h), 0, 1, 0xFFFFFFFF, 0, 1}
+    };
+    device->SetTexture(0, uiTexture);
+    device->SetPixelShader(nullptr);
+    device->SetVertexShader(nullptr);
+    device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, quad, sizeof(TVertex));
+    if (state) { state->Apply(); state->Release(); }
 }
 
-static void __fastcall HookDrawFrontEnd(void* self, void*) {
-    if (InterlockedCompareExchange(&customMainMenuVisible, 0, 0)) return;
-    originalDrawFrontEnd(self);
+static void __fastcall HookRenderSplash(void* self, void*) {
+    (void)self;
+}
+
+static void __fastcall HookRenderLoadingBar(void* self, void*) {
+    (void)self;
 }
 
 static HRESULT STDMETHODCALLTYPE HookEndScene(IDirect3DDevice9* device) {
@@ -196,11 +261,10 @@ static HRESULT STDMETHODCALLTYPE HookEndScene(IDirect3DDevice9* device) {
     }
     const bool customMain = InterlockedCompareExchange(&customMainMenuVisible, 0, 0) != 0;
     const bool overlay = InterlockedCompareExchange(&menuVisible, 0, 0) != 0;
-    if (customMain || overlay) DrawCustomMenu(device, customMain);
+    if (customMain || overlay) RenderMenuTexture(device, customMain);
     else ReleaseMenuCursor();
     return originalEndScene(device);
 }
-
 static HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD behavior,
                                                     D3DPRESENT_PARAMETERS* parameters, IDirect3DDevice9** output) {
     gameWindow = focus;
@@ -245,26 +309,35 @@ static void AddGameMoney() {
 static void __cdecl HookGameProcess() {
     originalGameProcess();
     if (GetAsyncKeyState(VK_F8) & 1) AddGameMoney();
+    HMODULE game = GetModuleHandleW(nullptr);
+    if (game && reinterpret_cast<uintptr_t>(game) == 0x400000) {
+        auto* menuVisibleFlag = reinterpret_cast<volatile BYTE*>(0xBA67A4);
+        MEMORY_BASIC_INFORMATION info{};
+        if (VirtualQuery(const_cast<BYTE*>(menuVisibleFlag), &info, sizeof(info)) &&
+            info.AllocationBase == game && (info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)))
+            *menuVisibleFlag = 0;
+    }
 }
 
-static void InstallFrontEndHook() {
+static void InstallLoadingHooks() {
     HMODULE game = GetModuleHandleW(nullptr);
-    void* address = reinterpret_cast<void*>(0x57C290);
-    MEMORY_BASIC_INFORMATION memory{};
-    if (reinterpret_cast<uintptr_t>(game) != 0x400000 ||
-        !VirtualQuery(address, &memory, sizeof(memory)) || memory.AllocationBase != game ||
-        (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) {
-        OutputDebugStringW(L"[IrAutoX] GTA front-end draw hook validation failed.\\n");
-        InterlockedExchange(&customMainMenuVisible, 0);
-        return;
+    if (!game || reinterpret_cast<uintptr_t>(game) != 0x400000) return;
+    const uintptr_t addresses[] = {0x58FF60, 0x590370};
+    void* hooks[] = {reinterpret_cast<void*>(&HookRenderSplash), reinterpret_cast<void*>(&HookRenderLoadingBar)};
+    void** originals[] = {reinterpret_cast<void**>(&originalRenderSplash), reinterpret_cast<void**>(&originalRenderLoadingBar)};
+    for (int i = 0; i < 2; ++i) {
+        MEMORY_BASIC_INFORMATION memory{};
+        void* target = reinterpret_cast<void*>(addresses[i]);
+        if (!VirtualQuery(target, &memory, sizeof(memory)) || memory.AllocationBase != game ||
+            (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0)
+            continue;
+        if (MH_CreateHook(target, hooks[i], originals[i]) == MH_OK) MH_EnableHook(target);
     }
-    if (MH_CreateHook(address, &HookDrawFrontEnd, reinterpret_cast<void**>(&originalDrawFrontEnd)) == MH_OK &&
-        MH_EnableHook(address) == MH_OK) {
-        OutputDebugStringW(L"[IrAutoX] Custom GTA front-end menu hook installed.\\n");
-    } else {
-        InterlockedExchange(&customMainMenuVisible, 0);
-        OutputDebugStringW(L"[IrAutoX] Could not install custom front-end menu hook.\\n");
-    }
+    auto* menuVisibleFlag = reinterpret_cast<volatile BYTE*>(0xBA67A4);
+    MEMORY_BASIC_INFORMATION data{};
+    if (VirtualQuery(const_cast<BYTE*>(menuVisibleFlag), &data, sizeof(data)) &&
+        data.AllocationBase == game && (data.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)))
+        *menuVisibleFlag = 0;
 }
 
 static void InstallGameHook() {
@@ -290,7 +363,7 @@ static void InstallGameHook() {
 static DWORD WINAPI InitializeHooks(void*) {
     if (MH_Initialize() != MH_OK) return 0;
     InstallGameHook();
-    InstallFrontEndHook();
+    InstallLoadingHooks();
     HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
     if (!d3d9) return 0;
     auto target = reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9"));
@@ -308,6 +381,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         if (thread) CloseHandle(thread);
     } else if (reason == DLL_PROCESS_DETACH) {
         MH_DisableHook(MH_ALL_HOOKS);
+        ReleaseUIResources();
+        ReleaseMenuCursor();
         MH_Uninitialize();
     }
     return TRUE;
