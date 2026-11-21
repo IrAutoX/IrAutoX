@@ -1,47 +1,26 @@
-# IrAutoX / iRx
+# IrAutoX / iRx 1.2
 
-A lightweight Windows SA-MP launcher with a custom WebView2 interface.
+Compact Win32 SA-MP launcher with an embedded web UI and native C++ host.
 
-## Features
-
-- Rounded desktop window and animated startup screen.
-- Dark violet server browser with Lucide icons.
-- Live server list from the open.mp public masterlist API.
-- Search, player sorting, favorites and recently played filters.
-- Persistent GTA San Andreas, sampcmd.exe and nickname settings.
-- Connects through the selected `sampcmd.exe` using `-c -h HOST -p PORT -n NICKNAME`.
-- Native 32-bit Windows host with WebView2; no Qt, Electron or Node runtime shipped.
+- HTML and minified Tailwind CSS are generated into a C++ header and embedded in IrAutoX.exe. Release ZIP contains only the EXE; no UI folder is distributed.
+- Borderless custom window, startup splash, gold/black dark theme and white/gold light theme following Windows appearance.
+- Live open.mp masterlist with IP, port, hostname, game mode, player counts, search and favorites.
+- Automatic GTA SA, samp.exe and sampcmd.exe detection using common install folders and registry keys.
+- Connects with sampcmd documented arguments; falls back to samp.exe command line when sampcmd is absent.
+- Optional native Discord Rich Presence module. Configure HKEY_CURRENT_USER\\Software\\IrAutoX\\DiscordAppId (REG_SZ) with your Discord application's ID.
 
 ## Requirements
 
-- Windows 10/11 x86 or x64.
-- 32-bit GTA San Andreas installation.
-- SA-MP installed and `sampcmd.exe` copied into the same folder as `gta_sa.exe`.
-- Microsoft Edge WebView2 Evergreen Runtime.
-- Internet connection for the live server list and remote font/icon assets.
+Windows 10/11, 32-bit GTA SA and SA-MP, Microsoft Edge WebView2 Evergreen Runtime. Internet is used for open.mp server data and remote icon/font assets.
 
 ## Build
 
-Install Visual Studio 2022 with Desktop development with C++, CMake and NuGet.
+Install Visual Studio 2022 Desktop C++, CMake, Python 3.12+, Node.js 22+ and NuGet.
 
-```powershell
-nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory packages
-cmake -S . -B build -A Win32 -DWEBVIEW2_ROOT="$((Get-ChildItem packages/Microsoft.Web.WebView2.* -Directory | Select-Object -First 1).FullName)"
-cmake --build build --config Release
-```
+    npm install
+    nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory packages
+    cmake -S . -B build -A Win32 -DWEBVIEW2_ROOT=<WebView2 NuGet directory>
+    npm run build:css
+    cmake --build build --config Release
 
-The executable is `build/Release/IrAutoX.exe`. Keep the `ui` folder beside it. The GitHub Actions workflow also creates a compressed `IrAutoX-win32.zip` artifact.
-
-## sampcmd
-
-This launcher uses the external sampcmd utility. Its documented command format is:
-
-```
-sampcmd.exe -c -h 127.0.0.1 -p 7777 -n Username
-```
-
-The launcher does not include SA-MP, GTA San Andreas, sampcmd, or game assets. Install these separately and select the executable paths in iRx.
-
-## Credits
-
-The layout takes inspiration from the interaction patterns of the open.mp launcher. This project is an independent implementation and does not copy its source code. Lucide icons are provided by Lucide.
+Output: build/Release/IrAutoX.exe. The UI source remains modular for development but is embedded during compilation.
