@@ -9,6 +9,7 @@
 #include <vector>
 #include <filesystem>
 #include <cstdlib>
+#include <iterator>
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -159,6 +160,7 @@ static void HandleMessage(const std::wstring& message) {
         SaveValue(L"SampCmdPath", g_sampcmdPath);
         Send(L"saved|1");
     } else if (p[0] == L"minimize") ShowWindow(g_window, SW_MINIMIZE);
+    else if (p[0] == L"drag") { ReleaseCapture(); SendMessageW(g_window, WM_NCLBUTTONDOWN, HTCAPTION, 0); }
     else if (p[0] == L"close") PostMessageW(g_window, WM_CLOSE, 0, 0);
 }
 
@@ -229,8 +231,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                         return S_OK;
                                     }).Get(), nullptr);
                             g_webview->SetVirtualHostNameToFolderMapping(L"app.irautox.local", L"ui", COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname); return S_OK; }).Get(), nullptr);
                             g_webview->Navigate(L"https://app.irautox.local/index.html");
-                            Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname);
                             return S_OK;
                         }).Get());
                 return S_OK;
