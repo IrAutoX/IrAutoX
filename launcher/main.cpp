@@ -230,7 +230,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                         }
                                         return S_OK;
                                     }).Get(), nullptr);
-                            g_webview->SetVirtualHostNameToFolderMapping(L"app.irautox.local", L"ui", COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            ComPtr<ICoreWebView2_3> webview3;
+                            if (SUCCEEDED(g_webview.As(&webview3)))
+                                webview3->SetVirtualHostNameToFolderMapping(L"app.irautox.local", L"ui", COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                             g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname); return S_OK; }).Get(), nullptr);
                             g_webview->Navigate(L"https://app.irautox.local/index.html");
                             return S_OK;
