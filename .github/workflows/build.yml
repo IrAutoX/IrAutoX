@@ -1,4 +1,4 @@
-name: IrAutoX Windows Build
+name: IrAutoX Native Windows Build
 on:
   push:
     branches: [ main ]
@@ -13,31 +13,16 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Install UI dependencies
-        run: npm install
-      - name: Install WebView2 SDK
-        shell: pwsh
-        run: |
-          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory packages -NonInteractive
-          $sdk = Get-ChildItem packages -Directory -Filter 'Microsoft.Web.WebView2.*' | Select-Object -First 1
-          "WEBVIEW2_ROOT=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Configure Win32
-        run: cmake -S . -B build -A Win32 -DWEBVIEW2_ROOT="$env:WEBVIEW2_ROOT"
-      - name: Compile Tailwind CSS
-        run: npm run build:css
-      - name: Build IrAutoX
+        run: cmake -S . -B build -A Win32
+      - name: Build native launcher
         run: cmake --build build --config Release --parallel
-      - name: Package embedded launcher
+      - name: Package native launcher
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item build/Release/IrAutoX.exe package/
+          Copy-Item LA.gif package/
           Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -CompressionLevel Optimal -Force
       - uses: actions/upload-artifact@v4
         with:
