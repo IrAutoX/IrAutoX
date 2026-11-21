@@ -5,6 +5,7 @@
 #include <dwmapi.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include "ui_bundle.h"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -19,6 +20,7 @@ static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 static std::wstring g_gtaPath;
 static std::wstring g_sampcmdPath;
+static std::wstring g_sampPath;
 static std::wstring g_nickname = L"DeathAmir";
 
 static std::wstring ReadValue(const wchar_t* name, const std::wstring& fallback = {}) {
@@ -68,6 +70,32 @@ static void Send(const std::wstring& value) {
     if (g_webview) g_webview->PostWebMessageAsString(value.c_str());
 }
 
+
+static std::wstring RegistryString(HKEY root, const wchar_t* keyPath, const wchar_t* valueName) {
+    HKEY key{}; if(RegOpenKeyExW(root,keyPath,0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return {};
+    wchar_t value[32768]{};DWORD bytes=sizeof(value),type=0;
+    LONG result=RegQueryValueExW(key,valueName,nullptr,&type,reinterpret_cast<BYTE*>(value),&bytes);RegCloseKey(key);
+    if(result!=ERROR_SUCCESS||(type!=REG_SZ&&type!=REG_EXPAND_SZ))return {};
+    std::wstring out(value);if(type==REG_EXPAND_SZ){wchar_t expanded[32768]{};ExpandEnvironmentStringsW(out.c_str(),expanded,32768);return expanded;}return out;
+}
+static std::wstring FindExecutable(const std::vector<std::filesystem::path>& roots,const wchar_t* exe) {
+    for(auto root:roots){if(root.filename()!=exe)root/=exe;std::error_code ec;if(std::filesystem::is_regular_file(root,ec))return root.wstring();}return {};
+}
+static void AutoDetect() {
+    wchar_t pf[MAX_PATH]{},pf86[MAX_PATH]{};GetEnvironmentVariableW(L"ProgramFiles",pf,MAX_PATH);GetEnvironmentVariableW(L"ProgramFiles(x86)",pf86,MAX_PATH);
+    std::vector<std::filesystem::path> roots;
+    for(const wchar_t* key:{L"Software\\Rockstar Games\\GTA San Andreas",L"Software\\WOW6432Node\\Rockstar Games\\GTA San Andreas",L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Grand Theft Auto San Andreas"})
+        for(const wchar_t* val:{L"InstallFolder",L"InstallLocation",L"InstallDir",L"Path"}){auto p=RegistryString(HKEY_LOCAL_MACHINE,key,val);if(p.empty())p=RegistryString(HKEY_CURRENT_USER,key,val);if(!p.empty())roots.emplace_back(p);}
+    roots.insert(roots.end(),{std::filesystem::path(pf)/L"Rockstar Games"/L"GTA San Andreas",std::filesystem::path(pf86)/L"Rockstar Games"/L"GTA San Andreas",std::filesystem::path(pf)/L"Steam"/L"steamapps"/L"common"/L"Grand Theft Auto San Andreas",std::filesystem::path(pf86)/L"Steam"/L"steamapps"/L"common"/L"Grand Theft Auto San Andreas",L"C:\\Games\\GTA San Andreas",L"C:\\Games\\GTA SA",L"D:\\Games\\GTA San Andreas",L"D:\\Games\\GTA SA",L"E:\\Games\\GTA San Andreas",L"F:\\Games\\GTA San Andreas"});
+    if(g_gtaPath.empty()||!std::filesystem::is_regular_file(g_gtaPath)){auto p=FindExecutable(roots,L"gta_sa.exe");if(!p.empty()){g_gtaPath=p;SaveValue(L"GamePath",p);}}
+    std::vector<std::filesystem::path> clients;if(!g_gtaPath.empty())clients.emplace_back(std::filesystem::path(g_gtaPath).parent_path());
+    for(const wchar_t* key:{L"Software\\SA-MP",L"Software\\WOW6432Node\\SA-MP",L"Software\\San Andreas Multiplayer"})
+        for(const wchar_t* val:{L"Install_Dir",L"InstallDir",L"Path"}){auto p=RegistryString(HKEY_CURRENT_USER,key,val);if(p.empty())p=RegistryString(HKEY_LOCAL_MACHINE,key,val);if(!p.empty())clients.emplace_back(p);}
+    clients.insert(clients.end(),{std::filesystem::path(pf)/L"SA-MP",std::filesystem::path(pf86)/L"SA-MP",std::filesystem::path(pf)/L"San Andreas Multiplayer",std::filesystem::path(pf86)/L"San Andreas Multiplayer",L"C:\\Games\\SA-MP",L"D:\\Games\\SA-MP"});
+    if(g_sampPath.empty()||!std::filesystem::is_regular_file(g_sampPath)){auto p=FindExecutable(clients,L"samp.exe");if(!p.empty()){g_sampPath=p;SaveValue(L"SampPath",p);}}
+    if(g_sampcmdPath.empty()||!std::filesystem::is_regular_file(g_sampcmdPath)){auto p=FindExecutable(clients,L"sampcmd.exe");if(!p.empty()){g_sampcmdPath=p;SaveValue(L"SampCmdPath",p);}}
+}
+
 static std::wstring PickFile(const wchar_t* filter, const std::wstring& current) {
     wchar_t file[32768]{};
     if (!current.empty()) lstrcpynW(file, current.c_str(), static_cast<int>(std::size(file)));
@@ -89,6 +117,9 @@ static void Browse(const std::wstring& kind) {
             SaveValue(L"GamePath", path);
             Send(L"gta|" + path);
         }
+    } else if (kind == L"samp") {
+        auto path = PickFile(L"SA-MP client (samp.exe)\\0samp.exe\\0Executable files (*.exe)\\0*.exe\\0\\0", g_sampPath);
+        if (!path.empty()) { g_sampPath = path; SaveValue(L"SampPath", path); Send(L"samp|" + path); }
     } else if (kind == L"sampcmd") {
         auto path = PickFile(L"SA-MP command launcher (sampcmd.exe)\\0sampcmd.exe\\0Executable files (*.exe)\\0*.exe\\0\\0", g_sampcmdPath);
         if (!path.empty()) {
@@ -100,64 +131,37 @@ static void Browse(const std::wstring& kind) {
 }
 
 static void Connect(const std::vector<std::wstring>& p) {
-    if (p.size() < 4) return;
-    const std::wstring host = Decode(p[1]);
-    const std::wstring portText = Decode(p[2]);
-    const std::wstring nickname = Decode(p[3]);
-    if (g_gtaPath.empty() || !std::filesystem::exists(g_gtaPath)) {
-        Send(L"error|Choose your GTA San Andreas executable first.");
-        return;
-    }
-    if (g_sampcmdPath.empty() || !std::filesystem::exists(g_sampcmdPath)) {
-        Send(L"error|Choose sampcmd.exe first.");
-        return;
-    }
-    if (std::filesystem::path(g_gtaPath).parent_path() != std::filesystem::path(g_sampcmdPath).parent_path()) {
-        Send(L"error|Put sampcmd.exe in the GTA San Andreas folder, beside gta_sa.exe.");
-        return;
-    }
-    wchar_t* end{};
-    const long port = wcstol(portText.c_str(), &end, 10);
-    if (host.empty() || host.find_first_of(L" \t\r\n\"") != std::wstring::npos || port < 1 || port > 65535 || !end || *end) {
-        Send(L"error|Invalid server address or port.");
-        return;
-    }
-    if (nickname.empty() || nickname.size() > 24 || nickname.find_first_of(L" \t\r\n\"") != std::wstring::npos) {
-        Send(L"error|Nickname must be 1-24 characters without spaces.");
-        return;
-    }
-    SaveValue(L"Nickname", nickname);
-    std::wstring args = L"-c -h \"" + host + L"\" -p " + std::to_wstring(port) + L" -n \"" + nickname + L"\"";
-    SHELLEXECUTEINFOW info{};
-    info.cbSize = sizeof(info);
-    info.fMask = SEE_MASK_NOCLOSEPROCESS;
-    info.hwnd = g_window;
-    info.lpVerb = L"open";
-    info.lpFile = g_sampcmdPath.c_str();
-    info.lpParameters = args.c_str();
-    const auto folder = std::filesystem::path(g_gtaPath).parent_path().wstring();
-    info.lpDirectory = folder.c_str();
-    info.nShow = SW_SHOWNORMAL;
-    if (ShellExecuteExW(&info)) {
-        if (info.hProcess) CloseHandle(info.hProcess);
-        Send(L"status|Launching SA-MP via sampcmd...");
-    } else {
-        Send(L"error|Could not start sampcmd.exe. Check the selected files and permissions.");
-    }
+    if(p.size()<4)return;
+    const std::wstring host=Decode(p[1]),portText=Decode(p[2]),nickname=Decode(p[3]);
+    if(g_gtaPath.empty()||!std::filesystem::is_regular_file(g_gtaPath)){Send(L"error|GTA San Andreas was not detected. Select gta_sa.exe.");return;}
+    if((g_sampcmdPath.empty()||!std::filesystem::is_regular_file(g_sampcmdPath))&&(g_sampPath.empty()||!std::filesystem::is_regular_file(g_sampPath))){Send(L"error|SA-MP was not detected. Select samp.exe or sampcmd.exe.");return;}
+    wchar_t* end{};const long port=wcstol(portText.c_str(),&end,10);
+    if(host.empty()||host.find_first_of(L" \t\r\n\"")!=std::wstring::npos||port<1||port>65535||!end||*end){Send(L"error|Invalid server address or port.");return;}
+    if(nickname.empty()||nickname.size()>24||nickname.find_first_of(L" \t\r\n\"")!=std::wstring::npos){Send(L"error|Nickname must be 1-24 characters without spaces.");return;}
+    SaveValue(L"Nickname",nickname);
+    const auto folder=std::filesystem::path(g_gtaPath).parent_path().wstring();
+    SHELLEXECUTEINFOW info{};info.cbSize=sizeof(info);info.fMask=SEE_MASK_NOCLOSEPROCESS;info.hwnd=g_window;info.lpVerb=L"open";
+    std::wstring args;
+    if(!g_sampcmdPath.empty()&&std::filesystem::is_regular_file(g_sampcmdPath)){info.lpFile=g_sampcmdPath.c_str();args=L"-c -h \""+host+L"\" -p "+std::to_wstring(port)+L" -n \""+nickname+L"\"";}
+    else{info.lpFile=g_sampPath.c_str();args=L"\""+host+L":"+std::to_wstring(port)+L"\" -n \""+nickname+L"\" -c";}
+    info.lpParameters=args.c_str();info.lpDirectory=folder.c_str();info.nShow=SW_SHOWNORMAL;
+    if(ShellExecuteExW(&info)){if(info.hProcess)CloseHandle(info.hProcess);Send(L"status|Starting SA-MP connection to "+host+L":"+std::to_wstring(port));}
+    else Send(L"error|Windows could not start the SA-MP client. Verify the selected executable.");
 }
-
 static void HandleMessage(const std::wstring& message) {
     auto p = Split(message);
     if (p.empty()) return;
     if (p[0] == L"browse" && p.size() > 1) Browse(p[1]);
     else if (p[0] == L"connect") Connect(p);
-    else if (p[0] == L"save" && p.size() > 3) {
+    else if (p[0] == L"save" && p.size() > 2) {
         g_nickname = Decode(p[1]);
         g_gtaPath = Decode(p[2]);
-        g_sampcmdPath = Decode(p[3]);
+        if (p.size() > 3) g_sampcmdPath = Decode(p[3]);
+        if (p.size() > 4) g_sampPath = Decode(p[4]);
         SaveValue(L"Nickname", g_nickname);
         SaveValue(L"GamePath", g_gtaPath);
         SaveValue(L"SampCmdPath", g_sampcmdPath);
+        SaveValue(L"SampPath", g_sampPath);
         Send(L"saved|1");
     } else if (p[0] == L"minimize") ShowWindow(g_window, SW_MINIMIZE);
     else if (p[0] == L"drag") { ReleaseCapture(); SendMessageW(g_window, WM_NCLBUTTONDOWN, HTCAPTION, 0); }
@@ -178,6 +182,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         m->ptMinTrackSize = {1000, 660};
         return 0;
     }
+    if(msg==WM_NCHITTEST){POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);RECT r{};GetClientRect(hwnd,&r);constexpr int e=7;bool l=p.x<e,rt=p.x>=r.right-e,t=p.y<e,b=p.y>=r.bottom-e;if(t&&l)return HTTOPLEFT;if(t&&rt)return HTTOPRIGHT;if(b&&l)return HTBOTTOMLEFT;if(b&&rt)return HTBOTTOMRIGHT;if(l)return HTLEFT;if(rt)return HTRIGHT;if(t)return HTTOP;if(b)return HTBOTTOM;}
     if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -187,6 +192,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     g_gtaPath = ReadValue(L"GamePath");
     g_sampcmdPath = ReadValue(L"SampCmdPath");
     g_nickname = ReadValue(L"Nickname", L"DeathAmir");
+    g_sampPath = ReadValue(L"SampPath");
+    AutoDetect();
 
     const wchar_t className[] = L"IrAutoXWindow";
     WNDCLASSW wc{};
@@ -197,7 +204,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     wc.lpszClassName = className;
     RegisterClassW(&wc);
 
-    g_window = CreateWindowExW(0, className, L"iRx | IrAutoX", WS_OVERLAPPEDWINDOW,
+    g_window = CreateWindowExW(WS_EX_APPWINDOW, className, L"iRx | IrAutoX", WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, 1380, 900, nullptr, nullptr, instance, nullptr);
     if (!g_window) return 1;
     const int corner = 2;
@@ -230,11 +237,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                         }
                                         return S_OK;
                                     }).Get(), nullptr);
-                            ComPtr<ICoreWebView2_3> webview3;
-                            if (SUCCEEDED(g_webview.As(&webview3)))
-                                webview3->SetVirtualHostNameToFolderMapping(L"app.irautox.local", L"ui", COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-                            g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname); return S_OK; }).Get(), nullptr);
-                            g_webview->Navigate(L"https://app.irautox.local/index.html");
+                            g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname + L"|" + g_sampPath); return S_OK; }).Get(), nullptr);
+                            const int bytes=MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,nullptr,0);
+                            std::wstring page(bytes>0?bytes-1:0,L'\0');
+                            if(bytes>1)MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,page.data(),bytes);
+                            g_webview->NavigateToString(page.c_str());
                             return S_OK;
                         }).Get());
                 return S_OK;
