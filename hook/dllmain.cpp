@@ -85,13 +85,14 @@ static void DrawMenu(IDirect3DDevice9* device) {
     device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-    Quad(device, x, y, 300, 184, D3DCOLOR_ARGB(238, 15, 13, 25));
+    Quad(device, x, y, 300, 210, D3DCOLOR_ARGB(238, 15, 13, 25));
     Quad(device, x, y, 300, 3, D3DCOLOR_ARGB(255, 137, 76, 255));
     Text(device, x + 18, y + 18, "IRAUTOX", 2.4f, D3DCOLOR_ARGB(255, 220, 190, 255));
     Text(device, x + 18, y + 54, "GTA SA 1.0", 1.5f, D3DCOLOR_ARGB(255, 235, 235, 245));
     Quad(device, x + 18, y + 83, 264, 1, D3DCOLOR_ARGB(100, 190, 160, 255));
     Text(device, x + 18, y + 98, gameHookInstalled ? "GAME LOOP HOOK" : "D3D HOOK ONLY", 1.5f, D3DCOLOR_ARGB(255, 80, 230, 150));
-    Text(device, x + 18, y + 132, "F7 CLOSE MENU", 1.2f, D3DCOLOR_ARGB(255, 190, 190, 205));
+    Text(device, x + 18, y + 132, "F8 ADD $10000", 1.2f, D3DCOLOR_ARGB(255, 100, 230, 160));
+    Text(device, x + 18, y + 164, "F7 CLOSE MENU", 1.2f, D3DCOLOR_ARGB(255, 190, 190, 205));
 
     if (state) {
         state->Apply();
@@ -130,8 +131,24 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdk) {
 }
 
 
+static void AddGameMoney() {
+    HMODULE game = GetModuleHandleW(nullptr);
+    void* address = reinterpret_cast<void*>(0xB7CE50);
+    MEMORY_BASIC_INFORMATION memory{};
+    if (!game || reinterpret_cast<uintptr_t>(game) != 0x400000 ||
+        !VirtualQuery(address, &memory, sizeof(memory)) ||
+        memory.AllocationBase != game ||
+        (memory.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) {
+        return;
+    }
+    auto* money = reinterpret_cast<volatile LONG*>(address);
+    InterlockedExchangeAdd(money, 10000);
+    OutputDebugStringW(L"[IrAutoX] Added $10,000 to the player money value.\\n");
+}
+
 static void __cdecl HookGameProcess() {
     originalGameProcess();
+    if (GetAsyncKeyState(VK_F8) & 1) AddGameMoney();
 }
 
 static void InstallGameHook() {
