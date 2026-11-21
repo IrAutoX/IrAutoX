@@ -116,7 +116,7 @@ static std::string MainHtml(){
  std::ifstream file(std::filesystem::path(g_exeDir)/L"ui.html",std::ios::binary);std::string html((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
  if(html.empty())return "<html><body style='background:#090a0f;color:white;font:16px Segoe UI;padding:40px'>IRAutoX interface could not be loaded.</body></html>";
  std::string servers=BuildServers();std::string nick=Html(WideUtf8(g_nick));size_t count=0;int players=0;{std::lock_guard<std::mutex> lock(g_mutex);count=g_servers.size();for(const auto& server:g_servers)players+=server.players;}
- ReplaceAll(html,"{{SERVERS}}",servers);ReplaceAll(html,"{{NICK}}",nick);ReplaceAll(html,"{{SERVER_COUNT}}",std::to_string(count));ReplaceAll(html,"{{PLAYER_COUNT}}",std::to_string(players));return html;
+ ReplaceAll(html,"{{SERVERS}}",servers);ReplaceAll(html,"__IRX_NICK__",nick);ReplaceAll(html,"{{SERVER_COUNT}}",std::to_string(count));ReplaceAll(html,"{{PLAYER_COUNT}}",std::to_string(players));return html;
 }
 static std::string SplashHtml(){
  return R"HTML(<!doctype html><html><head><meta charset="utf-8"><style>
