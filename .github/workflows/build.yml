@@ -22,13 +22,17 @@ jobs:
         run: cmake -S . -B build -A Win32 -DSCITER_SDK_DIR="$env:GITHUB_WORKSPACE/sciter-sdk"
       - name: Build Sciter launcher
         run: cmake --build build --config Release --parallel
-      - name: Package launcher
+      - name: Compress executable with UPX
+        shell: pwsh
+        run: |
+          choco install upx -y --no-progress
+          upx --best --lzma build/Release/IrAutoX.exe
+          upx -t build/Release/IrAutoX.exe
+      - name: Package standalone launcher
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item build/Release/IrAutoX.exe package/
-          Copy-Item build/Release/sciter.dll package/
-          Copy-Item LA.gif package/
           Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -CompressionLevel Optimal -Force
       - uses: actions/upload-artifact@v4
         with:
