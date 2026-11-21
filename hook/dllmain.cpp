@@ -31,6 +31,7 @@ static bool cursorAcquired = false;
 static bool gameHookInstalled = false;
 static volatile LONG menuVisible = 0;
 static bool deviceHookInstalled = false;
+static volatile LONG uiRendererReady = 0;
 
 struct Vertex {
     float x, y, z, rhw;
@@ -241,16 +242,23 @@ static void RenderMenuTexture(IDirect3DDevice9* device, bool mainMenu) {
     device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
     device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
     device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-    device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, quad, sizeof(TVertex));
+    device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    const HRESULT drawResult = device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, quad, sizeof(TVertex));
     if (state) { state->Apply(); state->Release(); }
+    if (SUCCEEDED(drawResult)) InterlockedExchange(&uiRendererReady, 1);
 }
 
 static void __fastcall HookRenderSplash(void* self, void*) {
-    (void)self;
+    if (!InterlockedCompareExchange(&uiRendererReady, 0, 0) && originalRenderSplash)
+        originalRenderSplash(self);
 }
 
 static void __fastcall HookRenderLoadingBar(void* self, void*) {
-    (void)self;
+    if (!InterlockedCompareExchange(&uiRendererReady, 0, 0) && originalRenderLoadingBar)
+        originalRenderLoadingBar(self);
 }
 
 static HRESULT STDMETHODCALLTYPE HookEndScene(IDirect3DDevice9* device) {
@@ -311,11 +319,13 @@ static void __cdecl HookGameProcess() {
     if (GetAsyncKeyState(VK_F8) & 1) AddGameMoney();
     HMODULE game = GetModuleHandleW(nullptr);
     if (game && reinterpret_cast<uintptr_t>(game) == 0x400000) {
+        if (InterlockedCompareExchange(&uiRendererReady, 0, 0)) {
         auto* menuVisibleFlag = reinterpret_cast<volatile BYTE*>(0xBA67A4);
         MEMORY_BASIC_INFORMATION info{};
         if (VirtualQuery(const_cast<BYTE*>(menuVisibleFlag), &info, sizeof(info)) &&
             info.AllocationBase == game && (info.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)))
             *menuVisibleFlag = 0;
+    }
     }
 }
 
@@ -333,11 +343,7 @@ static void InstallLoadingHooks() {
             continue;
         if (MH_CreateHook(target, hooks[i], originals[i]) == MH_OK) MH_EnableHook(target);
     }
-    auto* menuVisibleFlag = reinterpret_cast<volatile BYTE*>(0xBA67A4);
-    MEMORY_BASIC_INFORMATION data{};
-    if (VirtualQuery(const_cast<BYTE*>(menuVisibleFlag), &data, sizeof(data)) &&
-        data.AllocationBase == game && (data.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)))
-        *menuVisibleFlag = 0;
+    OutputDebugStringW(L"[IrAutoX] Loading hooks installed; vanilla screens remain enabled until custom D3D rendering succeeds.\\n");
 }
 
 static void InstallGameHook() {
