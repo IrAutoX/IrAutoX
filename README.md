@@ -6,7 +6,7 @@ A small 32-bit Windows launcher and runtime-hook prototype for the original PC r
 
 - Native Win32 launcher with a saved GTA executable path.
 - Starts `gta_sa.exe` suspended, injects `IrAutoXHook.dll`, then resumes the game.
-- Uses MinHook to intercept Direct3D 9 creation and the device's `EndScene` call.
+- Uses MinHook to hook GTA 1.0 US `CGame::Process` at `0x53BEE0` and Direct3D 9 creation / `EndScene`.
 - Press **F7** in-game to show or hide the IrAutoX test menu.
 - No multiplayer connection or server code is included yet.
 
