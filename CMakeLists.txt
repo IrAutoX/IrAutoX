@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(IrAutoX VERSION 0.1.0 LANGUAGES CXX)
+project(IrAutoX VERSION 0.1.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "IrAutoX currently supports Windows only")
