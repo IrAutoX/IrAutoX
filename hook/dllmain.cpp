@@ -8,11 +8,17 @@ using Direct3DCreate9Fn = IDirect3D9* (WINAPI*)(UINT);
 using CreateDeviceFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
 using EndSceneFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*);
 using GameProcessFn = void (__cdecl*)();
+using FrontEndFn = void (__thiscall*)(void*);
 
 static Direct3DCreate9Fn originalDirect3DCreate9{};
 static CreateDeviceFn originalCreateDevice{};
 static EndSceneFn originalEndScene{};
 static GameProcessFn originalGameProcess{};
+static FrontEndFn originalDrawFrontEnd{};
+static volatile LONG customMainMenuVisible = 1;
+static volatile LONG settingsPage = 0;
+static HWND gameWindow{};
+static bool cursorAcquired = false;
 static bool gameHookInstalled = false;
 static volatile LONG menuVisible = 0;
 static bool deviceHookInstalled = false;
@@ -67,11 +73,45 @@ static void Text(IDirect3DDevice9* device, float x, float y, const char* value, 
     }
 }
 
-static void DrawMenu(IDirect3DDevice9* device) {
+static void AcquireMenuCursor() {
+    if (!cursorAcquired) {
+        ClipCursor(nullptr);
+        while (ShowCursor(TRUE) < 0) {}
+        cursorAcquired = true;
+    }
+    SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+}
+
+static void ReleaseMenuCursor() {
+    if (cursorAcquired) {
+        while (ShowCursor(FALSE) >= 0) {}
+        cursorAcquired = false;
+    }
+}
+
+static bool MousePosition(float& x, float& y) {
+    POINT point{};
+    if (!GetCursorPos(&point) || !gameWindow || !ScreenToClient(gameWindow, &point)) return false;
+    x = static_cast<float>(point.x);
+    y = static_cast<float>(point.y);
+    return true;
+}
+
+static bool Button(IDirect3DDevice9* device, float x, float y, float w, float h,
+                   float mouseX, float mouseY, bool mouseValid, const char* label) {
+    const bool hovered = mouseValid && mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+    const DWORD fill = hovered ? D3DCOLOR_ARGB(245, 226, 75, 55) : D3DCOLOR_ARGB(225, 28, 30, 34);
+    Quad(device, x, y, w, h, fill);
+    Quad(device, x, y, 3, h, D3DCOLOR_ARGB(255, 226, 75, 55));
+    Text(device, x + 20, y + (h - 14) * 0.5f, label, 2.0f,
+         hovered ? D3DCOLOR_ARGB(255, 255, 255, 255) : D3DCOLOR_ARGB(255, 225, 225, 220));
+    return hovered && (GetAsyncKeyState(VK_LBUTTON) & 1);
+}
+
+static void DrawCustomMenu(IDirect3DDevice9* device, bool mainMenu) {
     D3DVIEWPORT9 viewport{};
     if (FAILED(device->GetViewport(&viewport))) return;
-    const float x = viewport.Width * 0.5f - 150.0f;
-    const float y = viewport.Height * 0.5f - 92.0f;
+    AcquireMenuCursor();
 
     IDirect3DStateBlock9* state{};
     if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &state))) state->Capture();
@@ -85,14 +125,57 @@ static void DrawMenu(IDirect3DDevice9* device) {
     device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
-    Quad(device, x, y, 300, 210, D3DCOLOR_ARGB(238, 15, 13, 25));
-    Quad(device, x, y, 300, 3, D3DCOLOR_ARGB(255, 137, 76, 255));
-    Text(device, x + 18, y + 18, "IRAUTOX", 2.4f, D3DCOLOR_ARGB(255, 220, 190, 255));
-    Text(device, x + 18, y + 54, "GTA SA 1.0", 1.5f, D3DCOLOR_ARGB(255, 235, 235, 245));
-    Quad(device, x + 18, y + 83, 264, 1, D3DCOLOR_ARGB(100, 190, 160, 255));
-    Text(device, x + 18, y + 98, gameHookInstalled ? "GAME LOOP HOOK" : "D3D HOOK ONLY", 1.5f, D3DCOLOR_ARGB(255, 80, 230, 150));
-    Text(device, x + 18, y + 132, "F8 ADD $10000", 1.2f, D3DCOLOR_ARGB(255, 100, 230, 160));
-    Text(device, x + 18, y + 164, "F7 CLOSE MENU", 1.2f, D3DCOLOR_ARGB(255, 190, 190, 205));
+    const float width = static_cast<float>(viewport.Width);
+    const float height = static_cast<float>(viewport.Height);
+    float mouseX{}, mouseY{};
+    const bool mouseValid = MousePosition(mouseX, mouseY);
+
+    Quad(device, 0, 0, width, height, D3DCOLOR_ARGB(205, 8, 10, 13));
+    Quad(device, 0, height * 0.83f, width, height * 0.17f, D3DCOLOR_ARGB(100, 0, 0, 0));
+    Quad(device, width * 0.065f, height * 0.12f, 5, height * 0.72f, D3DCOLOR_ARGB(255, 226, 75, 55));
+
+    Text(device, width * 0.09f, height * 0.16f, "IRAUTOX", 4.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
+    Text(device, width * 0.092f, height * 0.25f, "SAN ANDREAS", 1.8f, D3DCOLOR_ARGB(255, 226, 75, 55));
+    Text(device, width * 0.092f, height * 0.30f, "COMMUNITY EDITION", 1.2f, D3DCOLOR_ARGB(220, 205, 207, 205));
+
+    const float bx = width * 0.09f;
+    const float by = height * 0.43f;
+    const float bw = width * 0.27f;
+    const float bh = height * 0.075f;
+    bool clicked = false;
+
+    if (mainMenu && !InterlockedCompareExchange(&settingsPage, 0, 0)) {
+        clicked = Button(device, bx, by, bw, bh, mouseX, mouseY, mouseValid, "PLAY");
+        if (!clicked) clicked = Button(device, bx, by + bh + 12, bw, bh, mouseX, mouseY, mouseValid, "SETTINGS");
+        if (!clicked) clicked = Button(device, bx, by + (bh + 12) * 2, bw, bh, mouseX, mouseY, mouseValid, "EXIT");
+        if (clicked) {
+            if (mouseY >= by + (bh + 12) * 2) {
+                PostMessageW(gameWindow, WM_CLOSE, 0, 0);
+            } else if (mouseY >= by + bh + 12) {
+                InterlockedExchange(&settingsPage, 1);
+            } else {
+                InterlockedExchange(&customMainMenuVisible, 0);
+                ReleaseMenuCursor();
+                INPUT input{};
+                input.type = INPUT_KEYBOARD;
+                input.ki.wVk = VK_RETURN;
+                SendInput(1, &input, sizeof(input));
+                input.ki.dwFlags = KEYEVENTF_KEYUP;
+                SendInput(1, &input, sizeof(input));
+            }
+        }
+    } else if (mainMenu) {
+        Text(device, bx, by, "SETTINGS", 2.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
+        Text(device, bx, by + 45, "GRAPHICS AND AUDIO", 1.3f, D3DCOLOR_ARGB(255, 190, 194, 194));
+        if (Button(device, bx, by + 100, bw, bh, mouseX, mouseY, mouseValid, "BACK"))
+            InterlockedExchange(&settingsPage, 0);
+    } else {
+        Text(device, bx, by, "IRAUTOX OVERLAY", 2.0f, D3DCOLOR_ARGB(255, 245, 242, 232));
+        Text(device, bx, by + 45, "F7 TO CLOSE", 1.3f, D3DCOLOR_ARGB(255, 190, 194, 194));
+    }
+
+    Text(device, width * 0.09f, height * 0.91f, "A NEW WAY TO PLAY SAN ANDREAS", 1.1f,
+         D3DCOLOR_ARGB(190, 210, 210, 205));
 
     if (state) {
         state->Apply();
@@ -100,14 +183,27 @@ static void DrawMenu(IDirect3DDevice9* device) {
     }
 }
 
+static void __fastcall HookDrawFrontEnd(void* self, void*) {
+    if (InterlockedCompareExchange(&customMainMenuVisible, 0, 0)) return;
+    originalDrawFrontEnd(self);
+}
+
 static HRESULT STDMETHODCALLTYPE HookEndScene(IDirect3DDevice9* device) {
-    if (GetAsyncKeyState(VK_F7) & 1) InterlockedXor(&menuVisible, 1);
-    if (InterlockedCompareExchange(&menuVisible, 0, 0)) DrawMenu(device);
+    if (GetAsyncKeyState(VK_F7) & 1) {
+        const LONG next = InterlockedXor(&menuVisible, 1) ^ 1;
+        if (next) AcquireMenuCursor();
+        else ReleaseMenuCursor();
+    }
+    const bool customMain = InterlockedCompareExchange(&customMainMenuVisible, 0, 0) != 0;
+    const bool overlay = InterlockedCompareExchange(&menuVisible, 0, 0) != 0;
+    if (customMain || overlay) DrawCustomMenu(device, customMain);
+    else ReleaseMenuCursor();
     return originalEndScene(device);
 }
 
 static HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD behavior,
                                                     D3DPRESENT_PARAMETERS* parameters, IDirect3DDevice9** output) {
+    gameWindow = focus;
     const HRESULT result = originalCreateDevice(d3d, adapter, type, focus, behavior, parameters, output);
     if (SUCCEEDED(result) && output && *output && !deviceHookInstalled) {
         void** table = *reinterpret_cast<void***>(*output);
@@ -151,6 +247,26 @@ static void __cdecl HookGameProcess() {
     if (GetAsyncKeyState(VK_F8) & 1) AddGameMoney();
 }
 
+static void InstallFrontEndHook() {
+    HMODULE game = GetModuleHandleW(nullptr);
+    void* address = reinterpret_cast<void*>(0x57C290);
+    MEMORY_BASIC_INFORMATION memory{};
+    if (reinterpret_cast<uintptr_t>(game) != 0x400000 ||
+        !VirtualQuery(address, &memory, sizeof(memory)) || memory.AllocationBase != game ||
+        (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) {
+        OutputDebugStringW(L"[IrAutoX] GTA front-end draw hook validation failed.\\n");
+        InterlockedExchange(&customMainMenuVisible, 0);
+        return;
+    }
+    if (MH_CreateHook(address, &HookDrawFrontEnd, reinterpret_cast<void**>(&originalDrawFrontEnd)) == MH_OK &&
+        MH_EnableHook(address) == MH_OK) {
+        OutputDebugStringW(L"[IrAutoX] Custom GTA front-end menu hook installed.\\n");
+    } else {
+        InterlockedExchange(&customMainMenuVisible, 0);
+        OutputDebugStringW(L"[IrAutoX] Could not install custom front-end menu hook.\\n");
+    }
+}
+
 static void InstallGameHook() {
     HMODULE game = GetModuleHandleW(nullptr);
     if (reinterpret_cast<uintptr_t>(game) != 0x400000) {
@@ -174,6 +290,7 @@ static void InstallGameHook() {
 static DWORD WINAPI InitializeHooks(void*) {
     if (MH_Initialize() != MH_OK) return 0;
     InstallGameHook();
+    InstallFrontEndHook();
     HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
     if (!d3d9) return 0;
     auto target = reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9"));
