@@ -143,10 +143,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  case WM_TIMER:
   if(hwnd==g_main&&wp==2){if(g_fetchDone&&!g_ready){std::string updated=MainHtml();SciterLoadHtml(g_main,(LPCBYTE)updated.data(),(UINT)updated.size(),g_baseUrl.c_str());g_ready=true;}return 0;}
   if(hwnd==g_splash&&wp==1){
-   ULONGLONG elapsed=GetTickCount64()-g_splashStarted;int value=(int)std::min<ULONGLONG>(100,elapsed*100/5000);
-   const wchar_t* task=elapsed<1200?L"Getting ready to launch...":elapsed<2800?L"Preparing launcher resources...":elapsed<4200?L"Loading server masterlist...":L"Almost ready...";
-   const wchar_t* stage=elapsed<1200?L"Initializing":elapsed<2800?L"Preparing interface":elapsed<4200?L"Connecting to masterlist":L"Finishing up";
-   (void)task;(void)stage;(void)value;
+   ULONGLONG elapsed=GetTickCount64()-g_splashStarted;
    if(elapsed>=5000){
     KillTimer(hwnd,1);
     if(!g_ready){std::string updated=MainHtml();SciterLoadHtml(g_main,(LPCBYTE)updated.data(),(UINT)updated.size(),g_baseUrl.c_str());g_ready=true;}
