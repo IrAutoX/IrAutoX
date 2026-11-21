@@ -1,7 +1,3 @@
-#define UNICODE
-#define _UNICODE
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
@@ -89,7 +85,7 @@ static void LaunchGame() {
     }
 
     SavePath(gamePath);
-    std::wstring command = L"\"" + gamePath + L"\"";
+    std::wstring command = L"\\"" + gamePath + L"\\"";
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
@@ -121,7 +117,7 @@ static void Browse(HWND window) {
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = window;
-    dialog.lpstrFilter = L"GTA San Andreas (gta_sa.exe)\0gta_sa.exe\0Executable files (*.exe)\0*.exe\0All files\0*.*\0";
+    dialog.lpstrFilter = L"GTA San Andreas (gta_sa.exe)\\0gta_sa.exe\\0Executable files (*.exe)\\0*.exe\\0All files\\0*.*\\0";
     dialog.lpstrFile = file;
     dialog.nMaxFile = static_cast<DWORD>(std::size(file));
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
