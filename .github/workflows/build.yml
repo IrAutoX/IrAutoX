@@ -40,7 +40,7 @@ jobs:
           ./.github/scripts/embed-qt.ps1
           New-Item -ItemType Directory -Force package, build | Out-Null
           rc /nologo /fo build/embedded_resources.res launcher/embedded_resources.rc
-          cl /nologo /O1 /Os /MT /EHsc /DUNICODE /D_UNICODE launcher/bootstrap.cpp build/embedded_resources.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /OUT:package/IrAutoX.exe shell32.lib
+          cl /nologo /std:c++17 /O1 /Os /MT /EHsc /DUNICODE /D_UNICODE launcher/bootstrap.cpp build/embedded_resources.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /OUT:package/IrAutoX.exe shell32.lib
       - name: Compress standalone executable
         shell: pwsh
         run: |
