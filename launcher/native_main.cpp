@@ -82,7 +82,7 @@ static bool HttpGet(const wchar_t* host,const wchar_t* path,std::string& out) {
  HINTERNET req=WinHttpOpenRequest(conn,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE);
  bool ok=false;if(req&&WinHttpSendRequest(req,WINHTTP_NO_ADDITIONAL_HEADERS,0,WINHTTP_NO_REQUEST_DATA,0,0,0)&&WinHttpReceiveResponse(req,nullptr)){
   DWORD status=0,size=sizeof(status);WinHttpQueryHeaders(req,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,WINHTTP_HEADER_NAME_BY_INDEX,&status,&size,WINHTTP_NO_HEADER_INDEX);
-  if(status==200){DWORD available=0;while(WinHttpQueryDataAvailable(req,&available)&&available){std::string chunk(available,'\\0');DWORD read=0;if(!WinHttpReadData(req,chunk.data(),available,&read)||!read)break;chunk.resize(read);out+=chunk;}ok=true;}
+  if(status==200){DWORD available=0;while(WinHttpQueryDataAvailable(req,&available)&&available){std::string chunk(available,'\0');DWORD read=0;if(!WinHttpReadData(req,chunk.data(),available,&read)||!read)break;chunk.resize(read);out+=chunk;}ok=true;}
  }
  if(req)WinHttpCloseHandle(req);WinHttpCloseHandle(conn);WinHttpCloseHandle(session);return ok;
 }
