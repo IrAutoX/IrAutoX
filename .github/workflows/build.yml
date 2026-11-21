@@ -1,4 +1,4 @@
-name: IrAutoX Sciter Windows Build
+name: IrAutoX Qt6 Standalone Windows Build
 on:
   push:
     branches: [ main ]
@@ -13,43 +13,49 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: ilammy/msvc-dev-cmd@v1
         with:
-          node-version: 22
-      - name: Build Next.js and Tailwind UI
-        working-directory: frontend
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
-      - name: Fetch Sciter x86 SDK
+          arch: x64
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtbase
+          cache: true
+      - name: Configure Qt6 launcher
+        run: cmake -S . -B build -A x64
+      - name: Build Qt6 launcher
+        run: cmake --build build --config Release --parallel
+      - name: Deploy Qt runtime
         shell: pwsh
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/c-smile/sciter-sdk.git sciter-sdk
-          git -C sciter-sdk sparse-checkout set include bin.win/x32
-      - name: Configure Win32
-        run: cmake -S . -B build -A Win32 -DSCITER_SDK_DIR="$env:GITHUB_WORKSPACE/sciter-sdk"
-      - name: Build Sciter launcher
-        run: cmake --build build --config Release --parallel
-      - name: Compress executable with UPX
+          New-Item -ItemType Directory -Force deploy | Out-Null
+          Copy-Item build/Release/IrAutoXQt.exe deploy/
+          windeployqt --release --no-translations --compiler-runtime --dir deploy deploy/IrAutoXQt.exe
+      - name: Embed Qt runtime into standalone executable
+        shell: pwsh
+        run: |
+          ./.github/scripts/embed-qt.ps1
+          New-Item -ItemType Directory -Force package, build | Out-Null
+          rc /nologo /fo build/embedded_resources.res launcher/embedded_resources.rc
+          cl /nologo /O1 /Os /MT /EHsc /DUNICODE /D_UNICODE launcher/bootstrap.cpp build/embedded_resources.res /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /OUT:package/IrAutoX.exe shell32.lib
+      - name: Compress standalone executable
         shell: pwsh
         run: |
           choco install upx -y --no-progress
-          upx --best --lzma build/Release/IrAutoX.exe
-          upx -t build/Release/IrAutoX.exe
-      - name: Package standalone launcher
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path package | Out-Null
-          Copy-Item build/Release/IrAutoX.exe package/
-          Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -CompressionLevel Optimal -Force
+          upx --best --lzma package/IrAutoX.exe
+          upx -t package/IrAutoX.exe
+          Compress-Archive -Path package/IrAutoX.exe -DestinationPath IrAutoX-win64.zip -CompressionLevel Optimal -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: IrAutoX-win32
-          path: IrAutoX-win32.zip
+          name: IrAutoX-Qt6-win64-standalone
+          path: IrAutoX-win64.zip
           if-no-files-found: error
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: IrAutoX-win32.zip
+          files: IrAutoX-win64.zip
           generate_release_notes: true
