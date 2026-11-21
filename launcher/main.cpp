@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <windowsx.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlwapi.h>
@@ -6,6 +7,7 @@
 #include <wrl.h>
 #include <WebView2.h>
 #include "ui_bundle.h"
+#include "discord_presence.h"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -145,7 +147,7 @@ static void Connect(const std::vector<std::wstring>& p) {
     if(!g_sampcmdPath.empty()&&std::filesystem::is_regular_file(g_sampcmdPath)){info.lpFile=g_sampcmdPath.c_str();args=L"-c -h \""+host+L"\" -p "+std::to_wstring(port)+L" -n \""+nickname+L"\"";}
     else{info.lpFile=g_sampPath.c_str();args=L"\""+host+L":"+std::to_wstring(port)+L"\" -n \""+nickname+L"\" -c";}
     info.lpParameters=args.c_str();info.lpDirectory=folder.c_str();info.nShow=SW_SHOWNORMAL;
-    if(ShellExecuteExW(&info)){if(info.hProcess)CloseHandle(info.hProcess);Send(L"status|Starting SA-MP connection to "+host+L":"+std::to_wstring(port));}
+    if(ShellExecuteExW(&info)){if(info.hProcess)CloseHandle(info.hProcess);DiscordPresence::SetJoining(host+L":"+std::to_wstring(port),host+L":"+std::to_wstring(port));Send(L"status|Starting SA-MP connection to "+host+L":"+std::to_wstring(port));}
     else Send(L"error|Windows could not start the SA-MP client. Verify the selected executable.");
 }
 static void HandleMessage(const std::wstring& message) {
@@ -183,7 +185,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if(msg==WM_NCHITTEST){POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);RECT r{};GetClientRect(hwnd,&r);constexpr int e=7;bool l=p.x<e,rt=p.x>=r.right-e,t=p.y<e,b=p.y>=r.bottom-e;if(t&&l)return HTTOPLEFT;if(t&&rt)return HTTOPRIGHT;if(b&&l)return HTBOTTOMLEFT;if(b&&rt)return HTBOTTOMRIGHT;if(l)return HTLEFT;if(rt)return HTRIGHT;if(t)return HTTOP;if(b)return HTBOTTOM;}
-    if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    if (msg == WM_DESTROY) { DiscordPresence::Shutdown(); PostQuitMessage(0); return 0; }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
@@ -194,6 +196,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     g_nickname = ReadValue(L"Nickname", L"DeathAmir");
     g_sampPath = ReadValue(L"SampPath");
     AutoDetect();
+    DiscordPresence::Initialize(ReadValue(L"DiscordAppId"));
 
     const wchar_t className[] = L"IrAutoXWindow";
     WNDCLASSW wc{};
@@ -210,8 +213,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     const int corner = 2;
     DwmSetWindowAttribute(g_window, 33, &corner, sizeof(corner));
 
-    const auto exeDir = std::filesystem::path(std::wstring(GetCommandLineW()).substr(1, std::wstring(GetCommandLineW()).find(L'"', 1) - 1)).parent_path();
-    const auto webData = exeDir / L"WebView2";
+    wchar_t local[MAX_PATH]{};
+    GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+    const auto webData = std::filesystem::path(local) / L"IrAutoX" / L"WebView2";
+    std::error_code ec;
+    std::filesystem::create_directories(webData, ec);
     CreateCoreWebView2EnvironmentWithOptions(nullptr, webData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
@@ -239,8 +245,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                     }).Get(), nullptr);
                             g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname + L"|" + g_sampPath); return S_OK; }).Get(), nullptr);
                             const int bytes=MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,nullptr,0);
-                            std::wstring page(bytes>0?bytes-1:0,L'\0');
-                            if(bytes>1)MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,page.data(),bytes);
+                            std::wstring page(bytes>0?bytes:0,L'\0');
+                            if(bytes>0){MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,page.data(),bytes);page.pop_back();}
                             g_webview->NavigateToString(page.c_str());
                             return S_OK;
                         }).Get());
