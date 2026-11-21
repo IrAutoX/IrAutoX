@@ -112,7 +112,7 @@ static UINT SC_CALLBACK HostCallback(LPSCITER_CALLBACK_NOTIFICATION note,LPVOID)
  if(uri.rfind(L"irx://",0)!=0)return LOAD_OK;
  if(uri.find(L"irx://close")==0)PostMessageW(note->hwnd,WM_CLOSE,0,0);
  else if(uri.find(L"irx://minimize")==0)ShowWindow(note->hwnd,SW_MINIMIZE);
- else if(uri.find(L"irx://refresh")==0){g_fetchDone=false;FetchServers();}
+ else if(uri.find(L"irx://refresh")==0){g_ready=false;g_fetchDone=false;FetchServers();}
  else if(uri.find(L"irx://connect")==0){std::wstring host=QueryValue(uri,L"host");int port=_wtoi(QueryValue(uri,L"port").c_str());if(!host.empty()&&port>0&&port<65536)ConnectServer(host,port);}
  else if(uri.find(L"irx://page?name=settings")==0){MessageBoxW(note->hwnd,L"Use Settings to choose your GTA San Andreas and SA-MP executable.",L"IrAutoX Settings",MB_OK);}
  return LOAD_DISCARD;
@@ -122,7 +122,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
  case WM_NCHITTEST:{POINT p{GET_X_LPARAM(lp),GET_Y_LPARAM(lp)};ScreenToClient(hwnd,&p);if(p.y<58)return HTCAPTION;break;}
  case WM_SIZE:if(wp!=SIZE_MINIMIZED)SetRound(hwnd,18);break;
- case WM_TIMER:if(hwnd==g_splash){int p=g_progress.load();if(p<93)g_progress=std::min(93,p+1);if(g_fetchDone){if(p<100)g_progress=std::min(100,p+4);}int v=g_progress.load();wchar_t script[256];swprintf_s(script,L"document.getElementById('percent').textContent='%d%%';document.getElementById('bar').style.width='%d%%';document.getElementById('stage').textContent='%s';",v,v,v<25?L"Initializing launcher...":v<55?L"Preparing native interface...":v<90?L"Loading server masterlist...":L"Almost ready...");SciterEval(hwnd,script,(UINT)wcslen(script),nullptr);if(v>=100&&g_fetchDone){KillTimer(hwnd,1);ShowWindow(g_main,SW_SHOW);UpdateWindow(g_main);DestroyWindow(hwnd);g_splash=nullptr;}}return 0;
+ case WM_TIMER:if(hwnd==g_main&&wp==2&&g_fetchDone&&!g_ready){std::string updated=MainHtml();SciterLoadHtml(g_main,(LPCBYTE)updated.data(),(UINT)updated.size(),g_baseUrl.c_str());g_ready=true;return 0;}if(hwnd==g_splash&&wp==1){int p=g_progress.load();if(p<93)g_progress=std::min(93,p+1);if(g_fetchDone){if(p<100)g_progress=std::min(100,p+4);}int v=g_progress.load();wchar_t script[256];swprintf_s(script,L"document.getElementById('percent').textContent='%d%%';document.getElementById('bar').style.width='%d%%';document.getElementById('stage').textContent='%s';",v,v,v<25?L"Initializing launcher...":v<55?L"Preparing native interface...":v<90?L"Loading server masterlist...":L"Almost ready...");SciterEval(hwnd,script,(UINT)wcslen(script),nullptr);if(v>=100&&g_fetchDone){KillTimer(hwnd,1);std::string updated=MainHtml();SciterLoadHtml(g_main,(LPCBYTE)updated.data(),(UINT)updated.size(),g_baseUrl.c_str());g_ready=true;ShowWindow(g_main,SW_SHOW);UpdateWindow(g_main);DestroyWindow(hwnd);g_splash=nullptr;}}return 0;
  case WM_APP+1:return 0;
  case WM_CLOSE:DestroyWindow(hwnd);return 0;
  case WM_DESTROY:if(hwnd==g_main){DiscordPresence::Shutdown();PostQuitMessage(0);}return 0;
@@ -142,7 +142,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int){
  RECT desktop{};SystemParametersInfoW(SPI_GETWORKAREA,0,&desktop,0);int sw=430,sh=270;int x=desktop.left+(desktop.right-desktop.left-sw)/2,y=desktop.top+(desktop.bottom-desktop.top-sh)/2;
  g_splash=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,L"IRAutoXSciter",L"IrAutoX Loading",WS_POPUP,x,y,sw,sh,nullptr,nullptr,instance,nullptr);if(!g_splash)return 4;SciterSetCallback(g_splash,HostCallback,nullptr);SetRound(g_splash,20);
  std::string splash=SplashHtml();SciterLoadHtml(g_splash,(LPCBYTE)splash.data(),(UINT)splash.size(),g_baseUrl.c_str());
- ShowWindow(g_splash,SW_SHOWNOACTIVATE);UpdateWindow(g_splash);SetTimer(g_splash,1,28,nullptr);FetchServers();
+ ShowWindow(g_splash,SW_SHOWNOACTIVATE);UpdateWindow(g_splash);SetTimer(g_splash,1,28,nullptr);SetTimer(g_main,2,350,nullptr);FetchServers();
  MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
  CoUninitialize();return (int)msg.wParam;
 }
