@@ -19,7 +19,7 @@ target_link_directories(IrAutoX PRIVATE "${WEBVIEW2_ROOT}/build/native/x86")
 target_compile_definitions(IrAutoX PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(IrAutoX PRIVATE /W4 /permissive- /O1 /Gy /Gw)
 target_link_options(IrAutoX PRIVATE /OPT:REF /OPT:ICF /LTCG)
-target_link_libraries(IrAutoX PRIVATE WebView2LoaderStatic.lib comctl32 shlwapi shell32 advapi32 ole32 dwmapi winhttp)
+target_link_libraries(IrAutoX PRIVATE WebView2LoaderStatic.lib comctl32 comdlg32 shlwapi shell32 advapi32 ole32 dwmapi)
 
 add_custom_command(TARGET IrAutoX POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/ui" "$<TARGET_FILE_DIR:IrAutoX>/ui"
