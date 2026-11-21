@@ -84,7 +84,7 @@ static void LaunchGame() {
     const auto dll = std::filesystem::path(gamePath).parent_path() / L"IrAutoXHook.dll";
     if (!std::filesystem::exists(dll)) {
         SetStatus(L"IrAutoXHook.dll must be beside gta_sa.exe.");
-        MessageBoxW(nullptr, (L"Copy IrAutoXHook.dll to:\n" + dll.wstring()).c_str(), L"IrAutoXX", MB_ICONWARNING);
+        MessageBoxW(nullptr, (L"Copy IrAutoXHook.dll to:\n" + dll.wstring()).c_str(), L"IrAutoX", MB_ICONWARNING);
         return;
     }
 
