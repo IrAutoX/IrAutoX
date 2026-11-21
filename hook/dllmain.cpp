@@ -7,10 +7,13 @@
 using Direct3DCreate9Fn = IDirect3D9* (WINAPI*)(UINT);
 using CreateDeviceFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
 using EndSceneFn = HRESULT (STDMETHODCALLTYPE*)(IDirect3DDevice9*);
+using GameProcessFn = void (__cdecl*)();
 
 static Direct3DCreate9Fn originalDirect3DCreate9{};
 static CreateDeviceFn originalCreateDevice{};
 static EndSceneFn originalEndScene{};
+static GameProcessFn originalGameProcess{};
+static bool gameHookInstalled = false;
 static volatile LONG menuVisible = 0;
 static bool deviceHookInstalled = false;
 
@@ -87,7 +90,7 @@ static void DrawMenu(IDirect3DDevice9* device) {
     Text(device, x + 18, y + 18, "IRAUTOX", 2.4f, D3DCOLOR_ARGB(255, 220, 190, 255));
     Text(device, x + 18, y + 54, "GTA SA 1.0", 1.5f, D3DCOLOR_ARGB(255, 235, 235, 245));
     Quad(device, x + 18, y + 83, 264, 1, D3DCOLOR_ARGB(100, 190, 160, 255));
-    Text(device, x + 18, y + 98, "HOOK ACTIVE", 1.5f, D3DCOLOR_ARGB(255, 80, 230, 150));
+    Text(device, x + 18, y + 98, gameHookInstalled ? "GAME LOOP HOOK" : "D3D HOOK ONLY", 1.5f, D3DCOLOR_ARGB(255, 80, 230, 150));
     Text(device, x + 18, y + 132, "F7 CLOSE MENU", 1.2f, D3DCOLOR_ARGB(255, 190, 190, 205));
 
     if (state) {
@@ -126,8 +129,34 @@ static IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdk) {
     return d3d;
 }
 
+
+static void __cdecl HookGameProcess() {
+    originalGameProcess();
+}
+
+static void InstallGameHook() {
+    HMODULE game = GetModuleHandleW(nullptr);
+    if (reinterpret_cast<uintptr_t>(game) != 0x400000) {
+        OutputDebugStringW(L"[IrAutoX] Unsupported executable base; GTA 1.0 US game hook skipped.\n");
+        return;
+    }
+    MEMORY_BASIC_INFORMATION memory{};
+    void* address = reinterpret_cast<void*>(0x53BEE0);
+    if (!VirtualQuery(address, &memory, sizeof(memory)) || memory.AllocationBase != game ||
+        (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) == 0) {
+        OutputDebugStringW(L"[IrAutoX] CGame::Process address validation failed.\n");
+        return;
+    }
+    if (MH_CreateHook(address, &HookGameProcess, reinterpret_cast<void**>(&originalGameProcess)) == MH_OK &&
+        MH_EnableHook(address) == MH_OK) {
+        gameHookInstalled = true;
+        OutputDebugStringW(L"[IrAutoX] GTA CGame::Process hook installed at 0x53BEE0.\n");
+    }
+}
+
 static DWORD WINAPI InitializeHooks(void*) {
     if (MH_Initialize() != MH_OK) return 0;
+    InstallGameHook();
     HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
     if (!d3d9) return 0;
     auto target = reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9"));
