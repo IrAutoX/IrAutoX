@@ -1,4 +1,4 @@
-name: IrAutoX Native Windows Build
+name: IrAutoX Sciter Windows Build
 on:
   push:
     branches: [ main ]
@@ -13,15 +13,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch Sciter x86 SDK
+        shell: pwsh
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/c-smile/sciter-sdk.git sciter-sdk
+          git -C sciter-sdk sparse-checkout set include bin.win/x32
       - name: Configure Win32
-        run: cmake -S . -B build -A Win32
-      - name: Build native launcher
+        run: cmake -S . -B build -A Win32 -DSCITER_SDK_DIR="$env:GITHUB_WORKSPACE/sciter-sdk"
+      - name: Build Sciter launcher
         run: cmake --build build --config Release --parallel
-      - name: Package native launcher
+      - name: Package launcher
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item build/Release/IrAutoX.exe package/
+          Copy-Item build/Release/sciter.dll package/
           Copy-Item LA.gif package/
           Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -CompressionLevel Optimal -Force
       - uses: actions/upload-artifact@v4
