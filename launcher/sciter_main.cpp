@@ -16,7 +16,6 @@
 #include <iomanip>
 #include <nlohmann/json.hpp>
 #include "sciter-x.h"
-#include "discord_presence.h"
 
 struct Server { std::string name, ip, mode; int port=7777, players=0, maxPlayers=0; bool password=false; };
 static HWND g_main{},g_splash{};
@@ -101,7 +100,7 @@ static void ConnectServer(const std::wstring& host,int port){
  if(client.empty()||!std::filesystem::is_regular_file(client)){MessageBoxW(g_main,L"Select samp.exe or sampcmd.exe in Settings first.",L"IrAutoX",MB_ICONWARNING);return;}
  std::wstring args;if(client==g_sampcmd)args=L"-c -h \""+host+L"\" -p "+std::to_wstring(port)+L" -n \""+g_nick+L"\"";else args=L"\""+host+L":"+std::to_wstring(port)+L"\" -n \""+g_nick+L"\" -c";
  auto dir=std::filesystem::path(g_game).parent_path().wstring();SHELLEXECUTEINFOW x{};x.cbSize=sizeof(x);x.fMask=SEE_MASK_NOCLOSEPROCESS;x.hwnd=g_main;x.lpVerb=L"open";x.lpFile=client.c_str();x.lpParameters=args.c_str();x.lpDirectory=dir.c_str();x.nShow=SW_SHOWNORMAL;
- if(ShellExecuteExW(&x)){if(x.hProcess)CloseHandle(x.hProcess);DiscordPresence::SetJoining(host+L":"+std::to_wstring(port),host+L":"+std::to_wstring(port));}else MessageBoxW(g_main,L"Could not start the SA-MP client.",L"IrAutoX",MB_ICONERROR);
+ if(ShellExecuteExW(&x)){if(x.hProcess)CloseHandle(x.hProcess);}else MessageBoxW(g_main,L"Could not start the SA-MP client.",L"IrAutoX",MB_ICONERROR);
 }
 static std::string BuildServers(){
  std::vector<Server> list;{std::lock_guard<std::mutex> lock(g_mutex);list=g_servers;}
@@ -121,9 +120,9 @@ static std::string MainHtml(){
 }
 static std::string SplashHtml(){
  return R"HTML(<!doctype html><html><head><meta charset="utf-8"><style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Segoe UI,Arial;background:#0c0c0b;color:#f6f1e5}body{border:1px solid #403722;border-radius:14px;padding:25px 30px 20px;display:flex;flex-direction:column;background:#10100e}.loader-container{width:120px;height:120px;position:relative;margin:0 auto 24px;display:flex;align-items:center;justify-content:center}.logo{position:absolute;width:120px;height:120px;object-fit:contain;z-index:2}.loader{position:absolute;inset:0;border-radius:50%;animation:rotate 2s linear infinite}.loader span{position:absolute;width:9px;height:9px;border-radius:50%;background:#d9b96e;box-shadow:0 0 12px #d9b96e}.loader span:nth-child(1){top:0;left:55px}.loader span:nth-child(2){right:0;top:55px;opacity:.75}.loader span:nth-child(3){bottom:0;left:55px;opacity:.55}.loader span:nth-child(4){left:0;top:55px;opacity:.35}@keyframes rotate{to{transform:rotate(360deg)}}.task{font-size:12px;font-weight:600;color:#e8e0cd;text-align:center;min-height:18px}.spacer{flex:1}.download-label{font-size:10px;font-weight:600;color:#d9d0bd;margin-bottom:7px}.progress-track{height:8px;width:100%;background:#29271f;border-radius:100px;overflow:hidden;box-shadow:0 1px 4px #000}.progress-fill{height:100%;width:0;background:#c9a65a;border-radius:100px;transition:width .08s linear}.progress-meta{display:flex;justify-content:space-between;margin-top:6px;color:#928a78;font-size:10px}.drag{position:absolute;left:0;top:0;width:100%;height:100%;z-index:5;behavior:window-drag}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Segoe UI,Arial;background:#0c0c0b;color:#f6f1e5}body{border:1px solid #403722;border-radius:14px;padding:25px 30px 20px;display:flex;flex-direction:column;background:#10100e}.loader-container{width:120px;height:120px;position:relative;margin:0 auto 24px;display:flex;align-items:center;justify-content:center}.logo{position:absolute;width:104px;height:104px;object-fit:contain;z-index:3}.ring{position:absolute;border-radius:50%;border:1px solid rgba(219,185,105,.55);inset:5px;animation:ringPulse 2.8s ease-in-out infinite}.ring-two{inset:-5px;border-color:rgba(219,185,105,.22);animation:ringPulse 2.8s ease-in-out infinite reverse}@keyframes ringPulse{0%,100%{transform:scale(.94);opacity:.35}50%{transform:scale(1.06);opacity:1}}.loader{position:absolute;inset:0;border-radius:50%;animation:rotate 2s linear infinite}.loader span{position:absolute;width:9px;height:9px;border-radius:50%;background:#d9b96e;box-shadow:0 0 12px #d9b96e}.loader span:nth-child(1){top:0;left:55px}.loader span:nth-child(2){right:0;top:55px;opacity:.75}.loader span:nth-child(3){bottom:0;left:55px;opacity:.55}.loader span:nth-child(4){left:0;top:55px;opacity:.35}@keyframes rotate{to{transform:rotate(360deg)}}.task{font-size:12px;font-weight:600;color:#e8e0cd;text-align:center;min-height:18px}.spacer{flex:1}.download-label{font-size:10px;font-weight:600;color:#d9d0bd;margin-bottom:7px}.progress-track{height:8px;width:100%;background:#29271f;border-radius:100px;overflow:hidden;box-shadow:0 1px 4px #000}.progress-fill{height:100%;width:38%;background:linear-gradient(90deg,#9d7937,#f0d18a,#9d7937);border-radius:100px;animation:progressMove 1.6s ease-in-out infinite}@keyframes progressMove{0%{transform:translateX(-110%)}100%{transform:translateX(280%)}}.progress-meta{display:flex;justify-content:space-between;margin-top:6px;color:#928a78;font-size:10px}.drag{position:absolute;left:0;top:0;width:100%;height:100%;z-index:5;behavior:window-drag}
 @media(prefers-color-scheme:light){html,body{background:#fff;color:#29261f}body{background:#fff;border-color:#e4d9bd}.task{color:#39352c}.loader span{background:#ad8538;box-shadow:0 0 12px #d4b36d}.progress-track{background:#eee9de}.progress-meta{color:#827b6e}.download-label{color:#625b4d}}
-</style></head><body><div class="loader-container"><div class="loader loader-dark"><span></span><span></span><span></span><span></span></div><img class="logo" src="LA.gif"></div><div class="task" id="task">Getting ready to launch...</div><div class="spacer"></div><div class="download-label" id="download-label">Preparing launcher resources</div><div class="progress-track"><div class="progress-fill" id="bar"></div></div><div class="progress-meta"><span id="stage">Initializing...</span><span id="percent">0%</span></div></body></html>)HTML";
+</style></head><body><div class="loader-container"><div class="loader loader-dark"><span></span><span></span><span></span><span></span></div><div class="ring ring-one"></div><div class="ring ring-two"></div><img class="logo" src="LA.gif"></div><div class="task">Initializing IrAutoX...</div><div class="spacer"></div><div class="download-label">Preparing launcher</div><div class="progress-track"><div class="progress-fill"></div></div><div class="progress-meta"><span>Starting services</span><span>PLEASE WAIT</span></div></body></html>)HTML";
 }
 static void SetRound(HWND hwnd,int radius){RECT r{};GetClientRect(hwnd,&r);HRGN region=CreateRoundRectRgn(0,0,r.right+1,r.bottom+1,radius,radius);SetWindowRgn(hwnd,region,TRUE);}
 static UINT SC_CALLBACK HostCallback(LPSCITER_CALLBACK_NOTIFICATION note,LPVOID){
@@ -147,8 +146,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
    ULONGLONG elapsed=GetTickCount64()-g_splashStarted;int value=(int)std::min<ULONGLONG>(100,elapsed*100/5000);
    const wchar_t* task=elapsed<1200?L"Getting ready to launch...":elapsed<2800?L"Preparing launcher resources...":elapsed<4200?L"Loading server masterlist...":L"Almost ready...";
    const wchar_t* stage=elapsed<1200?L"Initializing":elapsed<2800?L"Preparing interface":elapsed<4200?L"Connecting to masterlist":L"Finishing up";
-   wchar_t script[512];swprintf_s(script,L"document.getElementById('task').textContent='%s';document.getElementById('download-label').textContent='%s';document.getElementById('stage').textContent='%s';document.getElementById('percent').textContent='%d%%';document.getElementById('bar').style.width='%d%%';",task,task,stage,value,value);
-   SciterEval(hwnd,script,(UINT)wcslen(script),nullptr);
+   (void)task;(void)stage;(void)value;
    if(elapsed>=5000){
     KillTimer(hwnd,1);
     if(!g_ready){std::string updated=MainHtml();SciterLoadHtml(g_main,(LPCBYTE)updated.data(),(UINT)updated.size(),g_baseUrl.c_str());g_ready=true;}
@@ -159,7 +157,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
   break;
  case WM_APP+1:return 0;
  case WM_CLOSE:DestroyWindow(hwnd);return 0;
- case WM_DESTROY:if(hwnd==g_main){DiscordPresence::Shutdown();if(g_sciterModule){FreeLibrary(g_sciterModule);g_sciterModule=nullptr;}PostQuitMessage(0);}return 0;
+ case WM_DESTROY:if(hwnd==g_main){if(g_sciterModule){FreeLibrary(g_sciterModule);g_sciterModule=nullptr;}PostQuitMessage(0);}return 0;
  }
  return DefWindowProcW(hwnd,msg,wp,lp);
 }
@@ -169,7 +167,7 @@ static HWND CreateSciterWindow(const wchar_t* title,DWORD ex,DWORD style,int w,i
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int){
  g_instance=instance;CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(!PrepareRuntime()){MessageBoxW(nullptr,L"Could not initialize the embedded Sciter runtime.",L"IrAutoX",MB_ICONERROR);return 1;}
- DetectPaths();DiscordPresence::Initialize(ReadReg(L"DiscordAppId"));
+ DetectPaths();
  WNDCLASSEXW wc{sizeof(wc)};wc.style=CS_HREDRAW|CS_VREDRAW;wc.lpfnWndProc=WndProc;wc.hInstance=instance;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)GetStockObject(BLACK_BRUSH);wc.lpszClassName=L"IRAutoXSciter";if(!RegisterClassExW(&wc))return 1;
  g_main=CreateSciterWindow(L"IrAutoX",WS_EX_APPWINDOW,WS_POPUP|WS_THICKFRAME|WS_MINIMIZEBOX,1120,760);if(!g_main)return 2;
  std::string main=MainHtml();if(!SciterLoadHtml(g_main,(LPCBYTE)main.data(),(UINT)main.size(),g_baseUrl.c_str())){MessageBoxW(nullptr,L"Sciter could not load the launcher interface.",L"IrAutoX",MB_ICONERROR);return 3;}
