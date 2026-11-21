@@ -23,7 +23,7 @@ FetchContent_MakeAvailable(minhook)
 
 add_executable(IrAutoX WIN32 launcher/main.cpp)
 target_compile_definitions(IrAutoX PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(IrAutoX PRIVATE comdlg32 shell32)
+target_link_libraries(IrAutoX PRIVATE comdlg32 shell32 advapi32)
 
 add_library(IrAutoXHook SHARED hook/dllmain.cpp)
 target_compile_definitions(IrAutoXHook PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
