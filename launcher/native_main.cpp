@@ -196,7 +196,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show){
  IMGUI_CHECKVERSION();ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;Style();ImGui_ImplWin32_Init(g_hwnd);ImGui_ImplDX11_Init(g_device,g_context);LoadGif();FetchServers();ShowWindow(g_hwnd,show);UpdateWindow(g_hwnd);
  MSG msg{};while(msg.message!=WM_QUIT){while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}if(msg.message==WM_QUIT)break;
   int p=(int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-g_started).count()/17;g_progress=std::min(100,std::max(4,p));if(g_progress>=100)g_loading=false;
-  ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();if(g_loading)DrawLoading();else DrawApp();ImGui::Render();
+  ImGui_ImplDX11_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();DrawApp();if(g_loading)DrawLoading();ImGui::Render();
   const float clear[4]={.035f,.034f,.030f,1};g_context->OMSetRenderTargets(1,&g_target,nullptr);g_context->ClearRenderTargetView(g_target,clear);ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());g_swap->Present(1,0);
  }
  ImGui_ImplDX11_Shutdown();ImGui_ImplWin32_Shutdown();ImGui::DestroyContext();if(g_target)g_target->Release();if(g_swap)g_swap->Release();if(g_context)g_context->Release();if(g_device)g_device->Release();CoUninitialize();return 0;
