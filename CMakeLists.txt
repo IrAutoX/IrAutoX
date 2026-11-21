@@ -21,9 +21,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(minhook)
 
-if(NOT TARGET minhook)
-    message(FATAL_ERROR "MinHook target was not created")
-endif()
+add_library(minhook STATIC
+    "${minhook_SOURCE_DIR}/src/buffer.c"
+    "${minhook_SOURCE_DIR}/src/hook.c"
+    "${minhook_SOURCE_DIR}/src/trampoline.c"
+    "${minhook_SOURCE_DIR}/src/hde/hde32.c"
+)
+
+target_include_directories(minhook
+    PUBLIC "${minhook_SOURCE_DIR}/include"
+    PRIVATE "${minhook_SOURCE_DIR}/src" "${minhook_SOURCE_DIR}/src/hde"
+)
+target_compile_definitions(minhook PRIVATE WIN32_LEAN_AND_MEAN)
 
 add_executable(IrAutoX WIN32 launcher/main.cpp)
 target_compile_definitions(IrAutoX PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -38,6 +47,7 @@ set_target_properties(IrAutoXHook PROPERTIES OUTPUT_NAME "IrAutoXHook")
 if(MSVC)
     target_compile_options(IrAutoX PRIVATE /W4 /permissive-)
     target_compile_options(IrAutoXHook PRIVATE /W4 /permissive-)
+    target_compile_options(minhook PRIVATE /W3)
 endif()
 
 install(TARGETS IrAutoX IrAutoXHook RUNTIME DESTINATION . LIBRARY DESTINATION .)
