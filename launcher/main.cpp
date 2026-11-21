@@ -85,7 +85,7 @@ static void LaunchGame() {
     }
 
     SavePath(gamePath);
-    std::wstring command = L"\\"" + gamePath + L"\\"";
+    std::wstring command = L"\"" + gamePath + L"\"";
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
