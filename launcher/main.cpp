@@ -7,6 +7,7 @@
 #include <shellapi.h>
 #include <string>
 #include <filesystem>
+#include <iterator>
 
 static HWND g_path;
 static HWND g_status;
