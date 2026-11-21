@@ -1,0 +1,48 @@
+name: IrAutoX Windows Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure 32-bit build
+        run: cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build launcher and hook
+        run: cmake --build build --config Release --parallel
+
+      - name: Stage package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item build/Release/IrAutoX.exe package/
+          Copy-Item build/Release/IrAutoXHook.dll package/
+          Copy-Item README.md package/
+          Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -Force
+
+      - name: Upload build package
+        uses: actions/upload-artifact@v4
+        with:
+          name: IrAutoX-win32
+          path: IrAutoX-win32.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: IrAutoX-win32.zip
+          generate_release_notes: true
