@@ -41,7 +41,7 @@ target_link_libraries(IrAutoX PRIVATE comdlg32 shell32 advapi32)
 add_library(IrAutoXHook SHARED hook/dllmain.cpp)
 target_include_directories(IrAutoXHook PRIVATE "${minhook_SOURCE_DIR}/include")
 target_compile_definitions(IrAutoXHook PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(IrAutoXHook PRIVATE minhook d3d9)
+target_link_libraries(IrAutoXHook PRIVATE minhook d3d9 gdi32)
 set_target_properties(IrAutoXHook PROPERTIES OUTPUT_NAME "IrAutoXHook")
 
 if(MSVC)
