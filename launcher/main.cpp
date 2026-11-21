@@ -13,11 +13,13 @@
 #include <filesystem>
 #include <cstdlib>
 #include <iterator>
+#include <cstring>
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
 
 static HWND g_window{};
+static ComPtr<ICoreWebView2Environment> g_environment;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 static std::wstring g_gtaPath;
@@ -226,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                     PostMessageW(g_window, WM_CLOSE, 0, 0);
                     return S_OK;
                 }
+                g_environment = env;
                 env->CreateCoreWebView2Controller(g_window,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [](HRESULT result, ICoreWebView2Controller* ctrl) -> HRESULT {
@@ -243,11 +246,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                         }
                                         return S_OK;
                                     }).Get(), nullptr);
+                            g_webview->AddWebResourceRequestedFilter(L"https://irautox.local/*", COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+                            g_webview->add_WebResourceRequested(Callback<ICoreWebView2WebResourceRequestedEventHandler>(
+                                [](ICoreWebView2* sender, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
+                                    ComPtr<ICoreWebView2WebResourceRequest> request;
+                                    args->get_Request(&request);
+                                    LPWSTR uri{};
+                                    if (request && SUCCEEDED(request->get_Uri(&uri)) && uri) {
+                                        if (wcsncmp(uri, L"https://irautox.local/", 21) == 0) {
+                                            IStream* stream = SHCreateMemStream(reinterpret_cast<const BYTE*>(kIrAutoXHtml), static_cast<UINT>(strlen(kIrAutoXHtml)));
+                                            if (stream) {
+                                                ComPtr<ICoreWebView2WebResourceResponse> response;
+                                                HRESULT hr = g_environment->CreateWebResourceResponse(stream, 200, L"OK", L"Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n", &response);
+                                                stream->Release();
+                                                if (SUCCEEDED(hr)) args->put_Response(response.Get());
+                                            }
+                                        }
+                                        CoTaskMemFree(uri);
+                                    }
+                                    return S_OK;
+                                }).Get(), nullptr);
                             g_webview->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>([](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname + L"|" + g_sampPath); return S_OK; }).Get(), nullptr);
-                            const int bytes=MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,nullptr,0);
-                            std::wstring page(bytes>0?bytes:0,L'\0');
-                            if(bytes>0){MultiByteToWideChar(CP_UTF8,0,kIrAutoXHtml,-1,page.data(),bytes);page.pop_back();}
-                            g_webview->NavigateToString(page.c_str());
+                            g_webview->Navigate(L"https://irautox.local/index.html");
                             return S_OK;
                         }).Get());
                 return S_OK;
