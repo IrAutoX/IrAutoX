@@ -13,6 +13,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Next.js and Tailwind UI
+        working-directory: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
       - name: Fetch Sciter x86 SDK
         shell: pwsh
         run: |
