@@ -114,7 +114,7 @@ static UINT SC_CALLBACK HostCallback(LPSCITER_CALLBACK_NOTIFICATION note,LPVOID)
  else if(uri.find(L"irx://minimize")==0)ShowWindow(note->hwnd,SW_MINIMIZE);
  else if(uri.find(L"irx://refresh")==0){g_ready=false;g_fetchDone=false;FetchServers();}
  else if(uri.find(L"irx://connect")==0){std::wstring host=QueryValue(uri,L"host");int port=_wtoi(QueryValue(uri,L"port").c_str());if(!host.empty()&&port>0&&port<65536)ConnectServer(host,port);}
- else if(uri.find(L"irx://page?name=settings")==0){MessageBoxW(note->hwnd,L"Use Settings to choose your GTA San Andreas and SA-MP executable.",L"IrAutoX Settings",MB_OK);}
+ else if(uri.find(L"irx://page?name=settings")==0){auto game=PickExe(L"GTA San Andreas\\0gta_sa.exe\\0Executables\\0*.exe\\0\\0",g_game);if(!game.empty()){g_game=game;WriteReg(L"GamePath",g_game);}auto samp=PickExe(L"SA-MP Client\\0samp.exe\\0Executables\\0*.exe\\0\\0",g_samp);if(!samp.empty()){g_samp=samp;WriteReg(L"SampPath",g_samp);}auto cmd=PickExe(L"SA-MP Command Client\\0sampcmd.exe\\0Executables\\0*.exe\\0\\0",g_sampcmd);if(!cmd.empty()){g_sampcmd=cmd;WriteReg(L"SampCmdPath",g_sampcmd);}}
  return LOAD_DISCARD;
 }
 static LRESULT CALLBACK WndProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp){
