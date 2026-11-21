@@ -21,11 +21,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(minhook)
 
+if(NOT TARGET minhook)
+    message(FATAL_ERROR "MinHook target was not created")
+endif()
+
 add_executable(IrAutoX WIN32 launcher/main.cpp)
 target_compile_definitions(IrAutoX PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(IrAutoX PRIVATE comdlg32 shell32 advapi32)
 
 add_library(IrAutoXHook SHARED hook/dllmain.cpp)
+target_include_directories(IrAutoXHook PRIVATE "${minhook_SOURCE_DIR}/include")
 target_compile_definitions(IrAutoXHook PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(IrAutoXHook PRIVATE minhook d3d9)
 set_target_properties(IrAutoXHook PROPERTIES OUTPUT_NAME "IrAutoXHook")
