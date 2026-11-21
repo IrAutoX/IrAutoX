@@ -1,9 +1,5 @@
-#define WINDOWS
-#define UNICODE
-#define _UNICODE
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
+#include <commdlg.h>
 #include <windowsx.h>
 #include <winhttp.h>
 #include <shellapi.h>
@@ -22,7 +18,6 @@
 #include "sciter-x.h"
 #include "discord_presence.h"
 
-using json = nlohmann::json;
 struct Server { std::string name, ip, mode; int port=7777, players=0, maxPlayers=0; bool password=false; };
 static HWND g_main{},g_splash{};
 static HINSTANCE g_instance{};
@@ -61,7 +56,7 @@ static bool HttpGet(std::string& body){
 }
 static void FetchServers(){
  std::thread([]{std::string body;bool ok=HttpGet(body);std::vector<Server> result;
-  if(ok)try{auto root=json::parse(body);if(root.is_object()&&root.contains("servers"))root=root["servers"];if(root.is_object()&&root.contains("data"))root=root["data"];
+  if(ok)try{auto root=nlohmann::json::parse(body);if(root.is_object()&&root.contains("servers"))root=root["servers"];if(root.is_object()&&root.contains("data"))root=root["data"];
    if(root.is_array())for(auto& v:root){Server s;s.ip=v.value("ip",v.value("address",v.value("ipv4",std::string{})));s.port=v.value("port",v.value("p",7777));s.name=v.value("hn",v.value("hostname",v.value("name",s.ip)));s.mode=v.value("gm",v.value("gamemode",std::string("SA-MP")));s.players=v.value("pc",v.value("players",0));s.maxPlayers=v.value("pm",v.value("maxplayers",0));s.password=v.value("password",v.value("pr",false));if(!s.ip.empty()&&s.port>0&&s.port<65536)result.push_back(std::move(s));}
   }catch(...){ok=false;}
   {std::lock_guard<std::mutex> lock(g_mutex);g_servers=std::move(result);}g_fetchOk=ok;g_fetchDone=true;if(g_splash)PostMessageW(g_splash,WM_APP+1,0,0);
