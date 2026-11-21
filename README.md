@@ -1,42 +1,47 @@
-# IrAutoX
+# IrAutoX / iRx
 
-A small 32-bit Windows launcher and runtime-hook prototype for the original PC release of Grand Theft Auto: San Andreas.
+A lightweight Windows SA-MP launcher with a custom WebView2 interface.
 
-## Prototype features
+## Features
 
-- Native Win32 launcher with a saved GTA executable path.
-- Starts `gta_sa.exe` suspended, injects `IrAutoXHook.dll`, then resumes the game.
-- Uses MinHook to hook GTA 1.0 US `CGame::Process` at `0x53BEE0` and Direct3D 9 creation / `EndScene`.
-- Select any 32-bit executable file; the launcher no longer requires the filename to be exactly `gta_sa.exe`.
-- Starts with a custom full-screen IrAutoX front-end styled with a dark, cinematic GTA-inspired palette; the stock front-end drawing is suppressed on the supported GTA SA 1.0 US executable.
-- The custom front-end has mouse-hover and click support, with PLAY, SETTINGS, and EXIT entries; the Windows cursor is shown while the custom menu is active.
-- Press **F7** in-game to show or hide the IrAutoX overlay menu.
-- Press **F8** in GTA SA 1.0 US to add $10,000 to the player's in-game money (offline test feature).
-- No multiplayer connection or server code is included yet.
+- Rounded desktop window and animated startup screen.
+- Dark violet server browser with Lucide icons.
+- Live server list from the open.mp public masterlist API.
+- Search, player sorting, favorites and recently played filters.
+- Persistent GTA San Andreas, sampcmd.exe and nickname settings.
+- Connects through the selected `sampcmd.exe` using `-c -h HOST -p PORT -n NICKNAME`.
+- Native 32-bit Windows host with WebView2; no Qt, Electron or Node runtime shipped.
 
 ## Requirements
 
-- Windows 10/11, 32-bit GTA SA process.
-- Original GTA San Andreas PC executable (GTA SA 1.0 US recommended).
-- Visual Studio 2022 with the Desktop development with C++ workload.
-- CMake 3.21+ and an internet connection for the MinHook dependency at configure time.
+- Windows 10/11 x86 or x64.
+- 32-bit GTA San Andreas installation.
+- SA-MP installed and `sampcmd.exe` copied into the same folder as `gta_sa.exe`.
+- Microsoft Edge WebView2 Evergreen Runtime.
+- Internet connection for the live server list and remote font/icon assets.
 
 ## Build
 
-From a Visual Studio Developer PowerShell:
+Install Visual Studio 2022 with Desktop development with C++, CMake and NuGet.
 
 ```powershell
-cmake -S . -B build -A Win32
+nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory packages
+cmake -S . -B build -A Win32 -DWEBVIEW2_ROOT="$((Get-ChildItem packages/Microsoft.Web.WebView2.* -Directory | Select-Object -First 1).FullName)"
 cmake --build build --config Release
 ```
 
-The output files are:
+The executable is `build/Release/IrAutoX.exe`. Keep the `ui` folder beside it. The GitHub Actions workflow also creates a compressed `IrAutoX-win32.zip` artifact.
 
-- `build/Release/IrAutoX.exe`
-- `build/Release/IrAutoXHook.dll`
+## sampcmd
 
-Put both files in the same directory as `gta_sa.exe`, run the launcher, select the game executable, and press **Launch GTA + Inject**.
+This launcher uses the external sampcmd utility. Its documented command format is:
 
-## Notes
+```
+sampcmd.exe -c -h 127.0.0.1 -p 7777 -n Username
+```
 
-This is an early prototype. The custom front-end, loading-screen, and menu hooks target the original GTA SA 1.0 US executable at fixed addresses and are not compatible with other game builds without address updates. The loading splash renderer and bar are suppressed; intro video playback may use a separate path and is not covered by these hooks. PLAY currently hands control back through the game's Enter input path; verify the new-game transition in-game. The Direct3D 9 interface and mouse interaction are experimental. The F8 money-value write is an offline test feature; networking, anti-cheat, and a full UI framework are not implemented. Test with a clean copy of GTA SA 1.0. The launcher does not include or distribute GTA game files.
+The launcher does not include SA-MP, GTA San Andreas, sampcmd, or game assets. Install these separately and select the executable paths in iRx.
+
+## Credits
+
+The layout takes inspiration from the interaction patterns of the open.mp launcher. This project is an independent implementation and does not copy its source code. Lucide icons are provided by Lucide.

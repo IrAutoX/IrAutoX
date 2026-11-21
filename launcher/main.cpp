@@ -1,177 +1,250 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlwapi.h>
+#include <dwmapi.h>
+#include <wrl.h>
+#include <WebView2.h>
 #include <string>
+#include <vector>
 #include <filesystem>
-#include <iterator>
+#include <cstdlib>
 
-static HWND g_path;
-static HWND g_status;
-static std::wstring g_dllPath;
+using Microsoft::WRL::Callback;
+using Microsoft::WRL::ComPtr;
 
-static void SetStatus(const std::wstring& value) {
-    SetWindowTextW(g_status, value.c_str());
+static HWND g_window{};
+static ComPtr<ICoreWebView2Controller> g_controller;
+static ComPtr<ICoreWebView2> g_webview;
+static std::wstring g_gtaPath;
+static std::wstring g_sampcmdPath;
+static std::wstring g_nickname = L"DeathAmir";
+
+static std::wstring ReadValue(const wchar_t* name, const std::wstring& fallback = {}) {
+    HKEY key{};
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\IrAutoX", 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return fallback;
+    wchar_t value[32768]{};
+    DWORD bytes = sizeof(value), type = REG_SZ;
+    const LONG result = RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(value), &bytes);
+    RegCloseKey(key);
+    return result == ERROR_SUCCESS ? std::wstring(value) : fallback;
 }
 
-static std::wstring ReadPath() {
-    wchar_t buffer[32768]{};
-    GetWindowTextW(g_path, buffer, static_cast<int>(std::size(buffer)));
-    return buffer;
-}
-
-static void SavePath(const std::wstring& value) {
+static void SaveValue(const wchar_t* name, const std::wstring& value) {
     HKEY key{};
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\IrAutoX", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
-        RegSetValueExW(key, L"GamePath", 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+        RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
         RegCloseKey(key);
     }
 }
 
-static std::wstring LoadPath() {
-    HKEY key{};
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\IrAutoX", 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return {};
-    wchar_t buffer[32768]{};
-    DWORD size = sizeof(buffer);
-    DWORD type = REG_SZ;
-    const auto result = RegQueryValueExW(key, L"GamePath", nullptr, &type, reinterpret_cast<BYTE*>(buffer), &size);
-    RegCloseKey(key);
-    return result == ERROR_SUCCESS ? buffer : L"";
+static std::wstring Decode(const std::wstring& value) {
+    std::wstring out;
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == L'%' && i + 2 < value.size()) {
+            wchar_t hex[3]{value[i + 1], value[i + 2], 0};
+            out.push_back(static_cast<wchar_t>(wcstol(hex, nullptr, 16)));
+            i += 2;
+        } else if (value[i] == L'+') out.push_back(L' ');
+        else out.push_back(value[i]);
+    }
+    return out;
 }
 
-static bool InjectDll(HANDLE process, const std::wstring& dllPath) {
-    const SIZE_T bytes = (dllPath.size() + 1) * sizeof(wchar_t);
-    void* remote = VirtualAllocEx(process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remote) return false;
-
-    SIZE_T written{};
-    if (!WriteProcessMemory(process, remote, dllPath.c_str(), bytes, &written) || written != bytes) {
-        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-        return false;
+static std::vector<std::wstring> Split(const std::wstring& value) {
+    std::vector<std::wstring> parts;
+    size_t start = 0;
+    while (start <= value.size()) {
+        size_t end = value.find(L'|', start);
+        parts.push_back(value.substr(start, end == std::wstring::npos ? end : end - start));
+        if (end == std::wstring::npos) break;
+        start = end + 1;
     }
-
-    const auto kernel = GetModuleHandleW(L"kernel32.dll");
-    const auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(kernel, "LoadLibraryW"));
-    if (!loadLibrary) {
-        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-        return false;
-    }
-
-    HANDLE thread = CreateRemoteThread(process, nullptr, 0, loadLibrary, remote, 0, nullptr);
-    if (!thread) {
-        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-        return false;
-    }
-
-    WaitForSingleObject(thread, 10000);
-    DWORD exitCode{};
-    const bool loaded = GetExitCodeThread(thread, &exitCode) && exitCode != 0;
-    CloseHandle(thread);
-    VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-    return loaded;
+    return parts;
 }
 
-static void LaunchGame() {
-    const std::wstring gamePath = ReadPath();
-    DWORD binaryType{};
-    if (gamePath.empty() || !std::filesystem::exists(gamePath) ||
-        !GetBinaryTypeW(gamePath.c_str(), &binaryType) || binaryType != SCS_32BIT_BINARY) {
-        SetStatus(L"Select a valid 32-bit GTA San Andreas executable.");
-        return;
-    }
-
-    const auto dll = std::filesystem::path(gamePath).parent_path() / L"IrAutoXHook.dll";
-    if (!std::filesystem::exists(dll)) {
-        SetStatus(L"IrAutoXHook.dll must be beside gta_sa.exe.");
-        MessageBoxW(nullptr, (L"Copy IrAutoXHook.dll to:\n" + dll.wstring()).c_str(), L"IrAutoX", MB_ICONWARNING);
-        return;
-    }
-
-    SavePath(gamePath);
-    std::wstring command = L"\"" + gamePath + L"\"";
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-
-    if (!CreateProcessW(gamePath.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr,
-                        std::filesystem::path(gamePath).parent_path().c_str(), &startup, &process)) {
-        SetStatus(L"Could not start GTA San Andreas.");
-        return;
-    }
-
-    SetStatus(L"Injecting IrAutoXHook...");
-    const bool injected = InjectDll(process.hProcess, dll.wstring());
-    ResumeThread(process.hThread);
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-
-    if (injected) {
-        SetStatus(L"Game started. Press F7 in-game to open the IrAutoX menu.");
-    } else {
-        SetStatus(L"Game started, but DLL injection failed. Check the DLL and architecture.");
-        MessageBoxW(nullptr, L"The game was started, but IrAutoXHook could not be injected.", L"IrAutoX", MB_ICONWARNING);
-    }
+static void Send(const std::wstring& value) {
+    if (g_webview) g_webview->PostWebMessageAsString(value.c_str());
 }
 
-static void Browse(HWND window) {
+static std::wstring PickFile(const wchar_t* filter, const std::wstring& current) {
     wchar_t file[32768]{};
-    const auto current = ReadPath();
     if (!current.empty()) lstrcpynW(file, current.c_str(), static_cast<int>(std::size(file)));
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = window;
-    dialog.lpstrFilter = L"All files (*.*)\0*.*\0Executable files (*.exe)\0*.exe\0GTA San Andreas (gta_sa.exe)\0gta_sa.exe\0\0";
+    dialog.hwndOwner = g_window;
+    dialog.lpstrFilter = filter;
     dialog.lpstrFile = file;
     dialog.nMaxFile = static_cast<DWORD>(std::size(file));
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (GetOpenFileNameW(&dialog)) {
-        SetWindowTextW(g_path, file);
-        SetStatus(L"GTA path selected.");
-        SavePath(file);
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    return GetOpenFileNameW(&dialog) ? std::wstring(file) : L"";
+}
+
+static void Browse(const std::wstring& kind) {
+    if (kind == L"gta") {
+        auto path = PickFile(L"GTA San Andreas (gta_sa.exe)\\0gta_sa.exe\\0Executable files (*.exe)\\0*.exe\\0\\0", g_gtaPath);
+        if (!path.empty()) {
+            g_gtaPath = path;
+            SaveValue(L"GamePath", path);
+            Send(L"gta|" + path);
+        }
+    } else if (kind == L"sampcmd") {
+        auto path = PickFile(L"SA-MP command launcher (sampcmd.exe)\\0sampcmd.exe\\0Executable files (*.exe)\\0*.exe\\0\\0", g_sampcmdPath);
+        if (!path.empty()) {
+            g_sampcmdPath = path;
+            SaveValue(L"SampCmdPath", path);
+            Send(L"sampcmd|" + path);
+        }
     }
 }
 
-static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    switch (message) {
-    case WM_CREATE:
-        CreateWindowW(L"STATIC", L"IRAutoX", WS_CHILD | WS_VISIBLE, 28, 22, 330, 42, window, nullptr, nullptr, nullptr);
-        CreateWindowW(L"STATIC", L"Grand Theft Auto: San Andreas  |  32-bit test build", WS_CHILD | WS_VISIBLE, 30, 65, 420, 24, window, nullptr, nullptr, nullptr);
-        g_path = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 30, 112, 360, 30, window, reinterpret_cast<HMENU>(101), nullptr, nullptr);
-        CreateWindowW(L"BUTTON", L"Browse", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 400, 112, 90, 30, window, reinterpret_cast<HMENU>(102), nullptr, nullptr);
-        CreateWindowW(L"BUTTON", L"Launch GTA + Inject", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 30, 165, 460, 42, window, reinterpret_cast<HMENU>(103), nullptr, nullptr);
-        g_status = CreateWindowW(L"STATIC", L"Select the GTA SA executable. Any filename is supported.", WS_CHILD | WS_VISIBLE, 30, 225, 470, 44, window, nullptr, nullptr, nullptr);
-        SetWindowTextW(g_path, LoadPath().c_str());
-        return 0;
-    case WM_COMMAND:
-        if (LOWORD(wParam) == 102) Browse(window);
-        if (LOWORD(wParam) == 103) LaunchGame();
-        return 0;
-    case WM_DESTROY:
-        PostQuitMessage(0);
+static void Connect(const std::vector<std::wstring>& p) {
+    if (p.size() < 4) return;
+    const std::wstring host = Decode(p[1]);
+    const std::wstring portText = Decode(p[2]);
+    const std::wstring nickname = Decode(p[3]);
+    if (g_gtaPath.empty() || !std::filesystem::exists(g_gtaPath)) {
+        Send(L"error|Choose your GTA San Andreas executable first.");
+        return;
+    }
+    if (g_sampcmdPath.empty() || !std::filesystem::exists(g_sampcmdPath)) {
+        Send(L"error|Choose sampcmd.exe first.");
+        return;
+    }
+    if (std::filesystem::path(g_gtaPath).parent_path() != std::filesystem::path(g_sampcmdPath).parent_path()) {
+        Send(L"error|Put sampcmd.exe in the GTA San Andreas folder, beside gta_sa.exe.");
+        return;
+    }
+    wchar_t* end{};
+    const long port = wcstol(portText.c_str(), &end, 10);
+    if (host.empty() || host.find_first_of(L" \t\r\n\"") != std::wstring::npos || port < 1 || port > 65535 || !end || *end) {
+        Send(L"error|Invalid server address or port.");
+        return;
+    }
+    if (nickname.empty() || nickname.size() > 24 || nickname.find_first_of(L" \t\r\n\"") != std::wstring::npos) {
+        Send(L"error|Nickname must be 1-24 characters without spaces.");
+        return;
+    }
+    SaveValue(L"Nickname", nickname);
+    std::wstring args = L"-c -h \"" + host + L"\" -p " + std::to_wstring(port) + L" -n \"" + nickname + L"\"";
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.hwnd = g_window;
+    info.lpVerb = L"open";
+    info.lpFile = g_sampcmdPath.c_str();
+    info.lpParameters = args.c_str();
+    const auto folder = std::filesystem::path(g_gtaPath).parent_path().wstring();
+    info.lpDirectory = folder.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (ShellExecuteExW(&info)) {
+        if (info.hProcess) CloseHandle(info.hProcess);
+        Send(L"status|Launching SA-MP via sampcmd...");
+    } else {
+        Send(L"error|Could not start sampcmd.exe. Check the selected files and permissions.");
+    }
+}
+
+static void HandleMessage(const std::wstring& message) {
+    auto p = Split(message);
+    if (p.empty()) return;
+    if (p[0] == L"browse" && p.size() > 1) Browse(p[1]);
+    else if (p[0] == L"connect") Connect(p);
+    else if (p[0] == L"save" && p.size() > 3) {
+        g_nickname = Decode(p[1]);
+        g_gtaPath = Decode(p[2]);
+        g_sampcmdPath = Decode(p[3]);
+        SaveValue(L"Nickname", g_nickname);
+        SaveValue(L"GamePath", g_gtaPath);
+        SaveValue(L"SampCmdPath", g_sampcmdPath);
+        Send(L"saved|1");
+    } else if (p[0] == L"minimize") ShowWindow(g_window, SW_MINIMIZE);
+    else if (p[0] == L"close") PostMessageW(g_window, WM_CLOSE, 0, 0);
+}
+
+static void Resize() {
+    if (!g_controller || !g_window) return;
+    RECT rc{};
+    GetClientRect(g_window, &rc);
+    g_controller->put_Bounds(rc);
+}
+
+static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_SIZE) { Resize(); return 0; }
+    if (msg == WM_GETMINMAXINFO) {
+        auto* m = reinterpret_cast<MINMAXINFO*>(lp);
+        m->ptMinTrackSize = {1000, 660};
         return 0;
     }
-    return DefWindowProcW(window, message, wParam, lParam);
+    if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
-    const wchar_t className[] = L"IrAutoXLauncherWindow";
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    g_gtaPath = ReadValue(L"GamePath");
+    g_sampcmdPath = ReadValue(L"SampCmdPath");
+    g_nickname = ReadValue(L"Nickname", L"DeathAmir");
+
+    const wchar_t className[] = L"IrAutoXWindow";
     WNDCLASSW wc{};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(19, 17, 30));
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = className;
     RegisterClassW(&wc);
 
-    HWND window = CreateWindowExW(0, className, L"IrAutoX Launcher", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                                  CW_USEDEFAULT, CW_USEDEFAULT, 550, 330, nullptr, nullptr, instance, nullptr);
-    if (!window) return 1;
-    ShowWindow(window, show);
-    UpdateWindow(window);
+    g_window = CreateWindowExW(0, className, L"iRx | IrAutoX", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1380, 900, nullptr, nullptr, instance, nullptr);
+    if (!g_window) return 1;
+    const int corner = 2;
+    DwmSetWindowAttribute(g_window, 33, &corner, sizeof(corner));
 
-    MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+    const auto exeDir = std::filesystem::path(std::wstring(GetCommandLineW()).substr(1, std::wstring(GetCommandLineW()).find(L'"', 1) - 1)).parent_path();
+    const auto webData = exeDir / L"WebView2";
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, webData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(hr) || !env) {
+                    MessageBoxW(g_window, L"Microsoft Edge WebView2 Runtime is required. Install the Evergreen Runtime and restart iRx.", L"iRx", MB_ICONERROR);
+                    PostMessageW(g_window, WM_CLOSE, 0, 0);
+                    return S_OK;
+                }
+                env->CreateCoreWebView2Controller(g_window,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [](HRESULT result, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(result) || !ctrl) return S_OK;
+                            g_controller = ctrl;
+                            g_controller->get_CoreWebView2(&g_webview);
+                            Resize();
+                            g_webview->add_WebMessageReceived(
+                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                                        LPWSTR raw{};
+                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                                            HandleMessage(raw);
+                                            CoTaskMemFree(raw);
+                                        }
+                                        return S_OK;
+                                    }).Get(), nullptr);
+                            g_webview->SetVirtualHostNameToFolderMapping(L"app.irautox.local", L"ui", COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            g_webview->Navigate(L"https://app.irautox.local/index.html");
+                            Send(L"config|" + g_gtaPath + L"|" + g_sampcmdPath + L"|" + g_nickname);
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
+
+    ShowWindow(g_window, show);
+    UpdateWindow(g_window);
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-    return static_cast<int>(message.wParam);
+    g_webview.Reset();
+    g_controller.Reset();
+    CoUninitialize();
+    return static_cast<int>(msg.wParam);
 }

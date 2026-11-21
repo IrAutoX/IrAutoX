@@ -15,32 +15,31 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure 32-bit build
-        run: cmake -S . -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build launcher and hook
+      - uses: actions/checkout@v4
+      - name: Install WebView2 SDK
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Web.WebView2 -Version 1.0.2903.40 -OutputDirectory packages -NonInteractive
+          $sdk = Get-ChildItem packages -Directory -Filter 'Microsoft.Web.WebView2.*' | Select-Object -First 1
+          "WEBVIEW2_ROOT=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Configure Win32
+        run: cmake -S . -B build -A Win32 -DWEBVIEW2_ROOT="$env:WEBVIEW2_ROOT"
+      - name: Build IrAutoX
         run: cmake --build build --config Release --parallel
-
-      - name: Stage package
+      - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item build/Release/IrAutoX.exe package/
-          Copy-Item build/Release/IrAutoXHook.dll package/
+          Copy-Item -Recurse ui package/
           Copy-Item README.md package/
-          Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -Force
-
-      - name: Upload build package
-        uses: actions/upload-artifact@v4
+          Compress-Archive -Path package/* -DestinationPath IrAutoX-win32.zip -CompressionLevel Optimal -Force
+      - uses: actions/upload-artifact@v4
         with:
           name: IrAutoX-win32
           path: IrAutoX-win32.zip
           if-no-files-found: error
-
-      - name: Publish GitHub Release
+      - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
