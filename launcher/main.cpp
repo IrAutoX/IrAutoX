@@ -72,8 +72,10 @@ static bool InjectDll(HANDLE process, const std::wstring& dllPath) {
 
 static void LaunchGame() {
     const std::wstring gamePath = ReadPath();
-    if (gamePath.empty() || !std::filesystem::exists(gamePath) || std::filesystem::path(gamePath).filename() != L"gta_sa.exe") {
-        SetStatus(L"Select a valid GTA San Andreas gta_sa.exe first.");
+    DWORD binaryType{};
+    if (gamePath.empty() || !std::filesystem::exists(gamePath) ||
+        !GetBinaryTypeW(gamePath.c_str(), &binaryType) || binaryType != SCS_32BIT_BINARY) {
+        SetStatus(L"Select a valid 32-bit GTA San Andreas executable.");
         return;
     }
 
@@ -136,7 +138,7 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPA
         g_path = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 30, 112, 360, 30, window, reinterpret_cast<HMENU>(101), nullptr, nullptr);
         CreateWindowW(L"BUTTON", L"Browse", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 400, 112, 90, 30, window, reinterpret_cast<HMENU>(102), nullptr, nullptr);
         CreateWindowW(L"BUTTON", L"Launch GTA + Inject", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 30, 165, 460, 42, window, reinterpret_cast<HMENU>(103), nullptr, nullptr);
-        g_status = CreateWindowW(L"STATIC", L"Select your original GTA SA 1.0 game executable.", WS_CHILD | WS_VISIBLE, 30, 225, 470, 44, window, nullptr, nullptr, nullptr);
+        g_status = CreateWindowW(L"STATIC", L"Select the GTA SA executable. Any filename is supported.", WS_CHILD | WS_VISIBLE, 30, 225, 470, 44, window, nullptr, nullptr, nullptr);
         SetWindowTextW(g_path, LoadPath().c_str());
         return 0;
     case WM_COMMAND:
