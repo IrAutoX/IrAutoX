@@ -119,7 +119,7 @@ static void Browse(HWND window) {
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = window;
-    dialog.lpstrFilter = L"GTA San Andreas (gta_sa.exe)\\0gta_sa.exe\\0Executable files (*.exe)\\0*.exe\\0All files\\0*.*\\0";
+    dialog.lpstrFilter = L"All files (*.*)\0*.*\0Executable files (*.exe)\0*.exe\0GTA San Andreas (gta_sa.exe)\0gta_sa.exe\0\0";
     dialog.lpstrFile = file;
     dialog.nMaxFile = static_cast<DWORD>(std::size(file));
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
